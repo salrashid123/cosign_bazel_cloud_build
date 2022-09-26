@@ -1,0 +1,6 @@
+{ 
+    "projectid": "$PROJECT_ID", 
+    "buildid": "$BUILD_ID", 
+    "foo": "bar", 
+    "commitsha": "foo"
+}

@@ -1,0 +1,41 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+load("@io_bazel_rules_docker//go:image.bzl", "go_image")
+load("@io_bazel_rules_docker//container:container.bzl", "container_image")
+load("@bazel_gazelle//:def.bzl", "gazelle")
+
+gazelle(name = "gazelle")
+
+# bazel run :gazelle -- update-repos -from_file=go.mod -prune=true -to_macro=repositories.bzl%go_repositories
+# bazel run  --platforms=@io_bazel_rules_go//go/toolchain:linux_amd64 :main
+# bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_amd64 :server
+#
+# bazel run  --platforms=@io_bazel_rules_go//go/toolchain:linux_amd64 :server
+
+
+go_binary(
+    name = "main",
+    embed = [":go_default_library"],
+    visibility = ["//visibility:public"],
+    goos = "linux", 
+    goarch = "amd64",     
+)
+
+container_image(
+    name = "server",
+    base = "@distroless_base//image",
+    entrypoint = ["/main"],
+    files = [":main"],
+    repository = "us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage"
+    #repository = "docker.io/salrashid123/myimage"    
+)
+
+go_library(
+    name = "go_default_library",
+    srcs = ["main.go"],
+    importpath = "main",
+    visibility = ["//visibility:private"],
+    deps = [
+        "@org_golang_x_net//http2:go_default_library",
+        "@com_github_gorilla_mux//:go_default_library",
+    ],
+)
