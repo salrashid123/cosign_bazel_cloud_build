@@ -986,7 +986,8 @@ Verified signature MEQCIGWaJFKrT1bS8FtK1avr8lUxCCK2f7DqMNFK0+SZrQSJAiB+hfhY73b99
 ### Sign without upload to registry
 
 
-The following will sign an image with a key you provide
+The following will sign an image with a key and verify with the signatuere provided inline (`--signature`)
+
 ```bash
 export IMAGE=docker.io/salrashid123/myimage:server
 export IMAGE_DIGEST=$IMAGE@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
@@ -1030,8 +1031,9 @@ cat /tmp/attest.txt  | jq '.'
 }
 ```
 
-end to end
+### Sign offline and attach
 
+The following will allow two different signer to create signatures using their own keys and then the repo owner can `attach` the signatures to the registry.  
 
 ```bash
 export IMAGE=us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage:server
