@@ -42,7 +42,7 @@ First lets go over the `cloudbuild.yaml` steps:
 
 This is the `bazel` build that guarantees you the code will produce a specific image hash everytime:
 
-* `securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52`
+* `securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753`
 
 ![images/build.png](images/build.png)
 
@@ -262,17 +262,17 @@ gcloud kms keys versions get-public-key 1  \
 
 # verify using the local key 
 cosign verify --key kms_pub.pem   \
-   us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
+   us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
 
 # or by api
 cosign verify --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 \
-      us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 | jq '.'
+      us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 | jq '.'
 ```
 
 Note this gives 
 
 ```text
-Verification for us-central1-docker.pkg.dev/mineral-minutia-820/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 --
+Verification for us-central1-docker.pkg.dev/mineral-minutia-820/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key
@@ -283,7 +283,7 @@ The following checks were performed on each of these signatures:
         "docker-reference": "us-central1-docker.pkg.dev/mineral-minutia-820/repo1/securebuild"
       },
       "image": {
-        "docker-manifest-digest": "sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52"
+        "docker-manifest-digest": "sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753"
       },
       "type": "cosign container image signature"
     },
@@ -302,13 +302,13 @@ The OIDC flow also creates entries in the  transparency logs
 TO verify,
 
 ```bash
-COSIGN_EXPERIMENTAL=1  cosign verify  us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 | jq '.'
+COSIGN_EXPERIMENTAL=1  cosign verify  us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 | jq '.'
 ```
 
 gives
 
 ```text
-Verification for us-central1-docker.pkg.dev/mineral-minutia-820/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 --
+Verification for us-central1-docker.pkg.dev/mineral-minutia-820/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - Existence of the claims in the transparency log was verified offline
@@ -320,7 +320,7 @@ The following checks were performed on each of these signatures:
         "docker-reference": "us-central1-docker.pkg.dev/mineral-minutia-820/repo1/securebuild"
       },
       "image": {
-        "docker-manifest-digest": "sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52"
+        "docker-manifest-digest": "sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753"
       },
       "type": "cosign container image signature"
     },
@@ -614,7 +614,7 @@ gives (again, note the attestations and `Index` that matches the "attest_oidc" s
 
 ```text
 LogID: c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
-Attestation: {"_type":"https://in-toto.io/Statement/v0.1","predicateType":"cosign.sigstore.dev/attestation/v1","subject":[{"name":"us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild","digest":{"sha256":"5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52"}}],"predicate":{"Data":"{ \"projectid\": \"cosign-test-383122\", \"buildid\": \"0a774360-d57e-41af-af8b-76dd4109c47c\", \"foo\":\"bar\", \"commitsha\": \"52dc8c1979d7e6b56a5a253dbd79028842752b08\" }","Timestamp":"2023-04-08T22:32:34Z"}}
+Attestation: {"_type":"https://in-toto.io/Statement/v0.1","predicateType":"cosign.sigstore.dev/attestation/v1","subject":[{"name":"us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild","digest":{"sha256":"83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753"}}],"predicate":{"Data":"{ \"projectid\": \"cosign-test-383122\", \"buildid\": \"0a774360-d57e-41af-af8b-76dd4109c47c\", \"foo\":\"bar\", \"commitsha\": \"52dc8c1979d7e6b56a5a253dbd79028842752b08\" }","Timestamp":"2023-04-08T22:32:34Z"}}
 Index: 17475497
 IntegratedTime: 2023-04-08T22:32:35Z
 UUID: 24296fb24b8ad77a31b10e4b97faecd20e3fab5192a93a388f183f5109280267cdaa60537878f0eb
@@ -729,7 +729,7 @@ You'll see the two signatures (one for KMS, another larger one for the OIDC sign
 ```text
 # go install github.com/google/go-containerregistry/cmd/crane@latest
 
-$ crane  manifest us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sig | jq '.'
+$ crane  manifest us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sig | jq '.'
 
 
 {
@@ -809,16 +809,16 @@ For the KMS based signature:
 
 ```text
 #  cosign attest --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 --predicate predicate.json \
-#     us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
+#     us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
 
 cosign verify-attestation \
   --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 \
     --policy policy.rego    \
-      us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
+      us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
 
 will be validating against Rego policies: [policy.rego]
 
-Verification for us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 --
+Verification for us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key
@@ -844,7 +844,7 @@ the decoded payload is
     {
       "name": "us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild",
       "digest": {
-        "sha256": "5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52"
+        "sha256": "83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753"
       }
     }
   ],
@@ -867,10 +867,10 @@ for the OIDC based signature,
 
 ```bash
 COSIGN_EXPERIMENTAL=1 cosign verify-attestation  --policy policy.rego    \
-        us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
+        us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
 
 
-Verification for us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 --
+Verification for us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - Existence of the claims in the transparency log was verified offline
@@ -899,7 +899,7 @@ cosign sign --annotations=key1=value1 \
       docker.io/salrashid123/securebuild:server
 
 cosign verify --key cert/kms_pub.pem   \
-    docker.io/salrashid123/securebuild:server@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
+    docker.io/salrashid123/securebuild:server@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
 
 
 COSIGN_EXPERIMENTAL=1 cosign attest \
@@ -909,7 +909,7 @@ COSIGN_EXPERIMENTAL=1 cosign attest \
 
 
 COSIGN_EXPERIMENTAL=1 cosign verify-attestation  --key cert/kms_pub.pem --policy policy.rego    \
-       docker.io/salrashid123/securebuild:server@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
+       docker.io/salrashid123/securebuild:server@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
 ```
 
 ### Cosign and Rekor APIs
@@ -1092,7 +1092,7 @@ kf4ghWWMEyXndi2W/zXeuCKZqc5fpEyxD7oqNnyM+7A=
  rekor logentry inclustion verified
 >>>>>>>>>> Verifying Image Signatures using provided PublicKey <<<<<<<<<<
 Verified signature MEQCIC/pp/wJIV3gmOhxdLMi8UcIwC47U8WFVicMcntF2ZtQAiAl6kYqifpQFqPEFsUTl5cTf+hFuuLlGzeWosBnLwwZeA==
-  Image Ref {sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52}
+  Image Ref {sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753}
 
 ```
 
@@ -1104,7 +1104,7 @@ The following will sign an image with a key and verify with the signatuere provi
 
 ```bash
 export IMAGE=docker.io/salrashid123/securebuild:server
-export IMAGE_DIGEST=$IMAGE@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
+export IMAGE_DIGEST=$IMAGE@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
 
 gcloud kms keys versions get-public-key 1  \
    --key=key1 --keyring=cosignkr  \
@@ -1152,7 +1152,7 @@ The following will allow two different signer to create signatures using their o
 
 ```bash
 export IMAGE=us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server
-export IMAGE_DIGEST=us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
+export IMAGE_DIGEST=us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
 
 ### Create a signer
 cosign generate-key-pair
@@ -1166,31 +1166,31 @@ cosign sign \
 
 cosign verify  --key c1.pub $IMAGE --signature sig.txt | jq '.'
 
-$ cosign tree us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
-  📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
-  └── 💾 Attestations for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.att
+$ cosign tree us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
+  📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
+  └── 💾 Attestations for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.att
     ├── 🍒 sha256:400b85ee2faf8e939ca92644dab7fcb69680729fcdf18c6d5798823e694bdeb8
     └── 🍒 sha256:b13908ecec6666c94a7ed985f51dab3dd42f24fa64650f247db270f9d89f2d79
-  └── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sig
+  └── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sig
     ├── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
     └── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
-  └── 📦 SBOMs for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sbom
+  └── 📦 SBOMs for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sbom
     └── 🍒 sha256:65178140d352ed9fd6a5f2e3d1a126497dab116f1ceb8c5fe5685516011e07b5
 
   # attach as repo owner
 cosign attach signature --signature `cat sig.txt` $IMAGE_DIGEST
 
 
-$ cosign tree us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
-  📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
-  └── 💾 Attestations for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.att
+$ cosign tree us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
+  📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
+  └── 💾 Attestations for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.att
     ├── 🍒 sha256:400b85ee2faf8e939ca92644dab7fcb69680729fcdf18c6d5798823e694bdeb8
     └── 🍒 sha256:b13908ecec6666c94a7ed985f51dab3dd42f24fa64650f247db270f9d89f2d79
-  └── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sig
+  └── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sig
     ├── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
     ├── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
     └── 🍒 sha256:15e121a0a6228ef2dc88ec13a865c3963fc238c64dc4e09b48edd80d573dadcb
-  └── 📦 SBOMs for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sbom
+  └── 📦 SBOMs for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sbom
     └── 🍒 sha256:65178140d352ed9fd6a5f2e3d1a126497dab116f1ceb8c5fe5685516011e07b5
 
 
@@ -1210,16 +1210,16 @@ cosign verify  --key c2.pub $IMAGE --signature sig.txt | jq '.'
 # attach as repo owner
 cosign attach signature --signature `cat sig.txt` $IMAGE_DIGEST
 
-📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
-└── 💾 Attestations for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.att
+📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
+└── 💾 Attestations for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.att
    ├── 🍒 sha256:400b85ee2faf8e939ca92644dab7fcb69680729fcdf18c6d5798823e694bdeb8
    └── 🍒 sha256:b13908ecec6666c94a7ed985f51dab3dd42f24fa64650f247db270f9d89f2d79
-└── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sig
+└── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sig
    ├── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
    ├── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
    ├── 🍒 sha256:15e121a0a6228ef2dc88ec13a865c3963fc238c64dc4e09b48edd80d573dadcb
    └── 🍒 sha256:15e121a0a6228ef2dc88ec13a865c3963fc238c64dc4e09b48edd80d573dadcb
-└── 📦 SBOMs for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sbom
+└── 📦 SBOMs for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sbom
    └── 🍒 sha256:65178140d352ed9fd6a5f2e3d1a126497dab116f1ceb8c5fe5685516011e07b5
 
 ```
@@ -1228,9 +1228,9 @@ cosign attach signature --signature `cat sig.txt` $IMAGE_DIGEST
 ### Verify the image `sbom`
 
 ```bash
-# cosign verify --key /tmp/kms_pub.pem --attachment=sbom          us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
+# cosign verify --key /tmp/kms_pub.pem --attachment=sbom          us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
 
-Verification for us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sbom --
+Verification for us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sbom --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key
