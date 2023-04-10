@@ -20,13 +20,21 @@ go_binary(
     goarch = "amd64",     
 )
 
+go_image(
+    name = "main_image",   
+    base = "@distroless_base//image",    
+    embed = [":go_default_library"],
+    visibility = ["//visibility:public"],
+    goos = "linux", 
+    goarch = "amd64",     
+)
+
 container_image(
     name = "server",
-    base = "@distroless_base//image",
-    entrypoint = ["/main"],
-    files = [":main"],
-    repository = "us-central1-docker.pkg.dev/builder-project/repo1/myimage"
-    #repository = "docker.io/salrashid123/myimage"    
+    base = ":main_image",
+    ports = ["8080"],
+    repository = "us-central1-docker.pkg.dev/builder-project/repo1/securebuild"
+    #repository = "docker.io/salrashid123/securebuild"    
 )
 
 go_library(

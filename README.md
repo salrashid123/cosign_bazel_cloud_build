@@ -6,7 +6,11 @@ In this tutorial, we will:
 
 1. generate a deterministic container image hash using  `bazel`
 2. use `cosign` to create provenance records for this image
-3. verify attestations and signatures using `KMS` and `OIDC` cross checked with a public transparency log.
+3. use `syft` to generate the container `sbom`
+4. use cosign to sign the container sbom
+5. verify attestations and signatures using `KMS` and `OIDC` cross checked with a public transparency log.
+6. use `syft` to generate the application `sbom`
+7. sign the application `sbom` with cosign
 
 We will use GCP-centric services here such as `Artifact Registry`, `Cloud BUild`, `Cloud Source Repository`.  
 
@@ -38,7 +42,7 @@ First lets go over the `cloudbuild.yaml` steps:
 
 This is the `bazel` build that guarantees you the code will produce a specific image hash everytime:
 
-* `myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753`
+* `securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52`
 
 ![images/build.png](images/build.png)
 
@@ -57,33 +61,16 @@ This step will issue a statement that includes attestation attributes users can 
 
 In this case, the attestation verification predicate includes some info from the build like the buildID and even the repo commithash.
 
-Someone who wants to verify any [in-toto attestation](https://docs.sigstore.dev/cosign/attestation/) can use these values. THis repo just adds some basic stuff like the `projectID`,  `buildID` and `commitsha` (in our case, its `dd93e9e893ffaf2c4cafeb2e534bf03f66d7bf28`):
+Someone who wants to verify any [in-toto attestation](https://docs.sigstore.dev/cosign/attestation/) can use these values. This repo just adds some basic stuff like the `projectID`,  `buildID` and `commitsha` (in our case, its `52dc8c1979d7e6b56a5a253dbd79028842752b08`):
 
 
 ```json
-{
-  "_type": "https://in-toto.io/Statement/v0.1",
-  "predicateType": "cosign.sigstore.dev/attestation/v1",
-  "subject": [
-    {
-      "name": "us-central1-docker.pkg.dev/cosign-test-365209/repo1/myimage",
-      "digest": {
-        "sha256": "83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753"
-      }
-    }
-  ],
-  "predicate": {
-    "Data": "{ 
-      \"projectid\": \"cosign-test-365209\", 
-      \"buildid\": \"0594f2e5-f600-48db-8aa2-daf58ee1acb5\", 
-      \"foo\":\"bar\", 
-      \"commitsha\": \"dd93e9e893ffaf2c4cafeb2e534bf03f66d7bf28\" }",
-    "Timestamp": "2022-10-11T09:52:25Z"
-  }
-}
+{ "projectid": "$PROJECT_ID", "buildid": "$BUILD_ID", "foo":"bar", "commitsha": "$COMMIT_SHA" }
 ```
 
 ![images/attestations.png](images/attestations.png)
+
+against commit
 
 ![images/commit.png](images/commit.png)
 
@@ -114,8 +101,26 @@ This will issue signed attestations using the OIDC token signing for fulcio
 
 ![images/attest_oidc.png](images/attest_oidc.png)
 
----
 
+#### Use Syft to generate image sbom
+
+Generate the container image's sbom
+
+![images/generate_sbom.png](images/generate_sbom.png)
+
+
+>> **NOTE**  the images i used here will _not_ show the detailed go packages.  see [https://github.com/anchore/syft/issues/1725](https://github.com/anchore/syft/issues/1725)
+
+Then attach (upload) it
+
+![images/attach_sbom.png](images/attach_sbom.png)
+#### Use Cosign to upload and sign the sbom
+
+Finally sign it in the registry
+
+![images/sign_sbom.png](images/sign_sbom.png)
+
+---
 
 ### Setup
 
@@ -213,7 +218,15 @@ gcloud source repos clone cosign-repo
 cd cosign-repo
 cp -R ../app/* .
 # remember to edit BUILD.bazel and replace the value with the actual project_ID value
-# for repository = "us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage"
+# for repository = "us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild"
+
+# optionally create the application sbom and sign it with the same cosign keypair
+# goreleaser release --snapshot  --rm-dist 
+## for github
+## git tag v1.0.0
+## git push origin --tags
+## goreleaser release --rm-dist
+
 
 git add -A
 git commit -m "add"
@@ -249,17 +262,17 @@ gcloud kms keys versions get-public-key 1  \
 
 # verify using the local key 
 cosign verify --key kms_pub.pem   \
-   us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
+   us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
 
 # or by api
 cosign verify --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 \
-      us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 | jq '.'
+      us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 | jq '.'
 ```
 
 Note this gives 
 
 ```text
-Verification for us-central1-docker.pkg.dev/cosign-test-365209/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 --
+Verification for us-central1-docker.pkg.dev/mineral-minutia-820/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key
@@ -267,10 +280,10 @@ The following checks were performed on each of these signatures:
   {
     "critical": {
       "identity": {
-        "docker-reference": "us-central1-docker.pkg.dev/cosign-test-365209/repo1/myimage"
+        "docker-reference": "us-central1-docker.pkg.dev/mineral-minutia-820/repo1/securebuild"
       },
       "image": {
-        "docker-manifest-digest": "sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753"
+        "docker-manifest-digest": "sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52"
       },
       "type": "cosign container image signature"
     },
@@ -289,13 +302,13 @@ The OIDC flow also creates entries in the  transparency logs
 TO verify,
 
 ```bash
-COSIGN_EXPERIMENTAL=1  cosign verify  us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 | jq '.'
+COSIGN_EXPERIMENTAL=1  cosign verify  us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 | jq '.'
 ```
 
 gives
 
 ```text
-Verification for us-central1-docker.pkg.dev/cosign-test-365209/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 --
+Verification for us-central1-docker.pkg.dev/mineral-minutia-820/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - Existence of the claims in the transparency log was verified offline
@@ -304,30 +317,30 @@ The following checks were performed on each of these signatures:
   {
     "critical": {
       "identity": {
-        "docker-reference": "us-central1-docker.pkg.dev/cosign-test-365209/repo1/myimage"
+        "docker-reference": "us-central1-docker.pkg.dev/mineral-minutia-820/repo1/securebuild"
       },
       "image": {
-        "docker-manifest-digest": "sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753"
+        "docker-manifest-digest": "sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52"
       },
       "type": "cosign container image signature"
     },
     "optional": {
+      "1.3.6.1.4.1.57264.1.1": "https://accounts.google.com",
       "Bundle": {
-        "SignedEntryTimestamp": "MEUCIGHZnUTc/IllmCsm0l/UYzxqyWWAcqMvPDM+uN6pNhBJAiEA/wZQxTTrjg76HMH5HnUU422/3MyDOgkfxVlEpRlHUYM=",
+        "SignedEntryTimestamp": "MEUCIQDdOUEUMeJD/yz1AlhQZr01qOb52YuzcN7JDzckeiWTvgIgHvDKcAoLXi6efRacsWOw7U6MO14Z7XrFBEm8AcJdqn4=",
         "Payload": {
-          "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoiaGFzaGVkcmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiI2YmJiZWRmMzRkN2EwMGU4YmUyOWFkYzlmNDczNzAyYzU3YmNlMjYyMmUxN2E1MWVjZDQyYTA1NDBkOWVlMDZmIn19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FVUNJUURRNGJmTTNRcy92cUUydk4wV0UvOXJySWFsYkdvZ3M3RDQ3VnJ1c3MzVVZnSWdScm9odWtHWW1Hd3Mvb2c1UWFhdDI1WGdTK3B6NzNWWkQzRTI2eWJOSGpjPSIsInB1YmxpY0tleSI6eyJjb250ZW50IjoiTFMwdExTMUNSVWRKVGlCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2sxSlNVTjJWRU5EUVd0UFowRjNTVUpCWjBsVlduRmhPRGhHZG5Ca2RVNXFOR1V6SzJKT2RWZDBjMXBSYVVsQmQwTm5XVWxMYjFwSmVtb3dSVUYzVFhjS1RucEZWazFDVFVkQk1WVkZRMmhOVFdNeWJHNWpNMUoyWTIxVmRWcEhWakpOVWpSM1NFRlpSRlpSVVVSRmVGWjZZVmRrZW1SSE9YbGFVekZ3WW01U2JBcGpiVEZzV2tkc2FHUkhWWGRJYUdOT1RXcEplRTFFUlhoTlJHc3hUV3BKTTFkb1kwNU5ha2w0VFVSRmVFMVVRWGROYWtrelYycEJRVTFHYTNkRmQxbElDa3R2V2tsNmFqQkRRVkZaU1V0dldrbDZhakJFUVZGalJGRm5RVVZyTkhoYU9HdFVlREJOV0RCVVJVVkplVUZ2TnpoM09XMHdNVWx6UkZGaVZqRlBhVXNLV1ZjNFRrUlplRWg2Y21oWmEwNHJheXRuVWxkdlNGSjNPV3RETlhCMmFrbGtiakpvWTJ0c01uQldNV1kwY1dsMmNHRlBRMEZYU1hkblowWmxUVUUwUndwQk1WVmtSSGRGUWk5M1VVVkJkMGxJWjBSQlZFSm5UbFpJVTFWRlJFUkJTMEpuWjNKQ1owVkdRbEZqUkVGNlFXUkNaMDVXU0ZFMFJVWm5VVlZPV2xkWkNsWllla05MTDB0VlVHeEpjRUZoTldSUWRHbExRbFpCZDBoM1dVUldVakJxUWtKbmQwWnZRVlV6T1ZCd2VqRlphMFZhWWpWeFRtcHdTMFpYYVhocE5Ga0tXa1E0ZDFCM1dVUldVakJTUVZGSUwwSkVWWGROTkVWNFdUSTVlbUZYWkhWUlIwNTJZekpzYm1KcE1UQmFXRTR3VEZSTk1rNVVTWGRQVXpWd1dWY3dkUXBhTTA1c1kyNWFjRmt5Vm1oWk1rNTJaRmMxTUV4dFRuWmlWRUZ3UW1kdmNrSm5SVVZCV1U4dlRVRkZRa0pDZEc5a1NGSjNZM3B2ZGt3eVJtcFpNamt4Q21KdVVucE1iV1IyWWpKa2MxcFROV3BpTWpCM1oxbHZSME5wYzBkQlVWRkNNVzVyUTBKQlNVVm1RVkkyUVVoblFXUm5RVWxaU2t4M1MwWk1MMkZGV0ZJS01GZHpibWhLZUVaYWVHbHpSbW96UkU5T1NuUTFjbmRwUW1wYWRtTm5RVUZCV1ZCSFpHSnJWVUZCUVVWQmQwSklUVVZWUTBsUlEzVldTWGQ1WW0xUmRRcHJWSHBKTkhwS2NHeHdVbXR2VkRRemREVmlkMVJHY1RSUU1XSm9WMDU0Y0RGQlNXZFZlVTU0WTA5Q2RERkJWMjl5Y3pKU1NIUm5TbnBLVkVnMmFXSTJDbEVyVUdSVmIwYzNjbmwwWjBkSGMzZERaMWxKUzI5YVNYcHFNRVZCZDAxRVlVRkJkMXBSU1hkVmIxVklaek5rVjBWT2IxVnRXRWczT1U5WlVURXhXa01LY0M5cVdtUXlNbEJHYlVOblRtbERSRTFwVEdwMVQyRnJSMWgzT0hkVVVHVTBUVkpxUVV0VE1rRnFSVUUxWkVOdGNVVjFPVnBwVG5wWlZIQkpNMlpCWlFwemJHdzRZMlZ6TXpseGFHVm5jMDh5WlV4NFdYSXJhM0JZYTFoUE5GcDRVMmt3UTNZcmNsSkZiV2xLWndvdExTMHRMVVZPUkNCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2c9PSJ9fX19",
-          "integratedTime": 1665481948,
-          "logIndex": 4884681,
+          "body": "eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoiaGFzaGVkcmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiJiMzA2NTAyMGUzMWM3MGI1ODMyZWNjNDYwYmM1YmNjYTcxOGNjZTg5NzRkMmNlNWY3Y2VhMzhhZjY4Yzg5MDkxIn19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FWUNJUURseHlDZkVCclVVS0gxV252RG5PckVDdmZEQitqNHhVRThNa3EybzZZdWFnSWhBS1RSQ0tQeGo1Y1VLTGNJUmxDMUJDdENIWDUvWkFUbjNocE1XdHNBTEdEZiIsInB1YmxpY0tleSI6eyJjb250ZW50IjoiTFMwdExTMUNSVWRKVGlCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2sxSlNVTTJWRU5EUVc1RFowRjNTVUpCWjBsVlVVMUJOamRWVGpGTWNsWlNjMUp0T0VkVmVFRXJXV3BDZGxWUmQwTm5XVWxMYjFwSmVtb3dSVUYzVFhjS1RucEZWazFDVFVkQk1WVkZRMmhOVFdNeWJHNWpNMUoyWTIxVmRWcEhWakpOVWpSM1NFRlpSRlpSVVVSRmVGWjZZVmRrZW1SSE9YbGFVekZ3WW01U2JBcGpiVEZzV2tkc2FHUkhWWGRJYUdOT1RXcE5kMDVFUVRWTmFrMTVUa1JKZVZkb1kwNU5hazEzVGtSQk5VMXFUWHBPUkVsNVYycEJRVTFHYTNkRmQxbElDa3R2V2tsNmFqQkRRVkZaU1V0dldrbDZhakJFUVZGalJGRm5RVVZJTTB0d2VqVndiWGhaUkZWdlEyYzFja1JxVDJGRk1EaEllWFJvZFcwM1YyOTZTRUlLYUZJNVZUQXpMM2RzVUU0MmNIQkllakJpTVVST1pFOXFkeTluY21aMGJuazVVSFpvYzBOUmRGZE5hVll4TjFWNGVHRlBRMEZaT0hkblowZE1UVUUwUndwQk1WVmtSSGRGUWk5M1VVVkJkMGxJWjBSQlZFSm5UbFpJVTFWRlJFUkJTMEpuWjNKQ1owVkdRbEZqUkVGNlFXUkNaMDVXU0ZFMFJVWm5VVlU1VkZkekNqZHBZbkpKYm1RM1dFUnBSbTl5VEV4dlJHRkJaR2xGZDBoM1dVUldVakJxUWtKbmQwWnZRVlV6T1ZCd2VqRlphMFZhWWpWeFRtcHdTMFpYYVhocE5Ga0tXa1E0ZDFGQldVUldVakJTUVZGSUwwSkVXWGRPU1VWNVdUSTVlbUZYWkhWUlJ6RndZbTFXZVZsWGQzUmlWMngxWkZoU2NGbFRNRFJOYWtGMVlWZEdkQXBNYldSNldsaEtNbUZYVG14WlYwNXFZak5XZFdSRE5XcGlNakIzUzFGWlMwdDNXVUpDUVVkRWRucEJRa0ZSVVdKaFNGSXdZMGhOTmt4NU9XaFpNazUyQ21SWE5UQmplVFZ1WWpJNWJtSkhWWFZaTWpsMFRVTnpSME5wYzBkQlVWRkNaemM0ZDBGUlowVklVWGRpWVVoU01HTklUVFpNZVRsb1dUSk9kbVJYTlRBS1kzazFibUl5T1c1aVIxVjFXVEk1ZEUxSlIwcENaMjl5UW1kRlJVRmtXalZCWjFGRFFraHpSV1ZSUWpOQlNGVkJNMVF3ZDJGellraEZWRXBxUjFJMFl3cHRWMk16UVhGS1MxaHlhbVZRU3pNdmFEUndlV2RET0hBM2J6UkJRVUZIU0dGR1Z5OHJVVUZCUWtGTlFWSnFRa1ZCYVVKS1FraDRhelZXU2psNk9XVk9DblJsUm5ocVpXVjZkaXR0VVZWdGVHbHpWMHhvVUd0RlZHUmhOR0ZHVVVsblZXOU1ialJUTUdKV1oxVkVUa0p0VTAxTWJVeDZaa2MxTkRGelRYWkROM01LUTFOdEx6UldVblJZZVVWM1EyZFpTVXR2V2tsNmFqQkZRWGROUkZwM1FYZGFRVWwzVFZaWFEyOVhUMlI1WkVZNGIydFVUV0ZVWkVWaUwzbGFRV3BxY0FwME5EUTJUa2h2VUhObmRDczRUMHREZUVOaVJtUXdhVGd6Ym5NeFVUWjBXblZQT0ZaQmFrRnFha2hDWWpSSVVsQXZPWFU0WnpkT2MydHNZaloyUTNkdENtaHFaWE5aUVdkMGQwdzNTVVpTV0V4dkwxSkVWbUV5UjBaR1V6bENibEZWU0ZkdmJrVXpNRDBLTFMwdExTMUZUa1FnUTBWU1ZFbEdTVU5CVkVVdExTMHRMUW89In19fX0=",
+          "integratedTime": 1681082664,
+          "logIndex": 17544187,
           "logID": "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d"
         }
       },
       "Issuer": "https://accounts.google.com",
-      "Subject": "cosign@cosign-test-365209.iam.gserviceaccount.com",
+      "Subject": "cosign@mineral-minutia-820.iam.gserviceaccount.com",
       "key1": "value1"
     }
   }
 ]
-
 ```
 
 Note that this is what is in the transparency log itself (`logID`, `logIndex`, etc)
@@ -343,13 +356,13 @@ decoding the `payload` using [jwt.io](jwt.io) gives json
     "data": {
       "hash": {
         "algorithm": "sha256",
-        "value": "6bbbedf34d7a00e8be29adc9f473702c57bce2622e17a51ecd42a0540d9ee06f"
+        "value": "02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce"
       }
     },
     "signature": {
-      "content": "MEUCIQDQ4bfM3Qs/vqE2vN0WE/9rrIalbGogs7D47Vruss3UVgIgRrohukGYmGws/og5Qaat25XgS+pz73VZD3E26ybNHjc=",
+      "content": "MEYCIQDYXlP/p84Gt2N4jczhUx52+BW+G1EUPLuaguLQ8C3GYAIhAO+nSII+gN6KGVEI0Yromod1Vl2C2wRZNhItNKjQPwC9",
       "publicKey": {
-        "content": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUN2VENDQWtPZ0F3SUJBZ0lVWnFhODhGdnBkdU5qNGUzK2JOdVd0c1pRaUlBd0NnWUlLb1pJemowRUF3TXcKTnpFVk1CTUdBMVVFQ2hNTWMybG5jM1J2Y21VdVpHVjJNUjR3SEFZRFZRUURFeFZ6YVdkemRHOXlaUzFwYm5SbApjbTFsWkdsaGRHVXdIaGNOTWpJeE1ERXhNRGsxTWpJM1doY05Nakl4TURFeE1UQXdNakkzV2pBQU1Ga3dFd1lICktvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVrNHhaOGtUeDBNWDBURUVJeUFvNzh3OW0wMUlzRFFiVjFPaUsKWVc4TkRZeEh6cmhZa04raytnUldvSFJ3OWtDNXB2aklkbjJoY2tsMnBWMWY0cWl2cGFPQ0FXSXdnZ0ZlTUE0RwpBMVVkRHdFQi93UUVBd0lIZ0RBVEJnTlZIU1VFRERBS0JnZ3JCZ0VGQlFjREF6QWRCZ05WSFE0RUZnUVVOWldZClZYekNLL0tVUGxJcEFhNWRQdGlLQlZBd0h3WURWUjBqQkJnd0ZvQVUzOVBwejFZa0VaYjVxTmpwS0ZXaXhpNFkKWkQ4d1B3WURWUjBSQVFIL0JEVXdNNEV4WTI5emFXZHVRR052YzJsbmJpMTBaWE4wTFRNMk5USXdPUzVwWVcwdQpaM05sY25acFkyVmhZMk52ZFc1MExtTnZiVEFwQmdvckJnRUVBWU8vTUFFQkJCdG9kSFJ3Y3pvdkwyRmpZMjkxCmJuUnpMbWR2YjJkc1pTNWpiMjB3Z1lvR0Npc0dBUVFCMW5rQ0JBSUVmQVI2QUhnQWRnQUlZSkx3S0ZML2FFWFIKMFdzbmhKeEZaeGlzRmozRE9OSnQ1cndpQmpadmNnQUFBWVBHZGJrVUFBQUVBd0JITUVVQ0lRQ3VWSXd5Ym1RdQprVHpJNHpKcGxwUmtvVDQzdDVid1RGcTRQMWJoV054cDFBSWdVeU54Y09CdDFBV29yczJSSHRnSnpKVEg2aWI2ClErUGRVb0c3cnl0Z0dHc3dDZ1lJS29aSXpqMEVBd01EYUFBd1pRSXdVb1VIZzNkV0VOb1VtWEg3OU9ZUTExWkMKcC9qWmQyMlBGbUNnTmlDRE1pTGp1T2FrR1h3OHdUUGU0TVJqQUtTMkFqRUE1ZENtcUV1OVppTnpZVHBJM2ZBZQpzbGw4Y2VzMzlxaGVnc08yZUx4WXIra3BYa1hPNFp4U2kwQ3YrclJFbWlKZwotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg=="
+        "content": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM2RENDQW0rZ0F3SUJBZ0lVWC9PZ0pPWEM2b2lKQUw3SFdqRkR6cWJSNnRZd0NnWUlLb1pJemowRUF3TXcKTnpFVk1CTUdBMVVFQ2hNTWMybG5jM1J2Y21VdVpHVjJNUjR3SEFZRFZRUURFeFZ6YVdkemRHOXlaUzFwYm5SbApjbTFsWkdsaGRHVXdIaGNOTWpNd05EQTRNakl6TWpJNVdoY05Nak13TkRBNE1qSTBNakk1V2pBQU1Ga3dFd1lICktvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVMVVl0VGdnQ1N2M3JGK2RyWTUvNkpqZmoxUXJxYlFXN1gxZ1EKSTFSS0cvOWhsVmU2NGdlSkxNQnhqTU9xN3pkdkVvb2ViRFRyNXJTNTBZQzRrbnlES0tPQ0FZNHdnZ0dLTUE0RwpBMVVkRHdFQi93UUVBd0lIZ0RBVEJnTlZIU1VFRERBS0JnZ3JCZ0VGQlFjREF6QWRCZ05WSFE0RUZnUVUxa0pvClVHY0pQdk5mempDUVVtNGVwVkZTTGlFd0h3WURWUjBqQkJnd0ZvQVUzOVBwejFZa0VaYjVxTmpwS0ZXaXhpNFkKWkQ4d1B3WURWUjBSQVFIL0JEVXdNNEV4WTI5emFXZHVRR052YzJsbmJpMTBaWE4wTFRNNE16RXlNaTVwWVcwdQpaM05sY25acFkyVmhZMk52ZFc1MExtTnZiVEFwQmdvckJnRUVBWU8vTUFFQkJCdG9kSFJ3Y3pvdkwyRmpZMjkxCmJuUnpMbWR2YjJkc1pTNWpiMjB3S3dZS0t3WUJCQUdEdnpBQkNBUWREQnRvZEhSd2N6b3ZMMkZqWTI5MWJuUnoKTG1kdmIyZHNaUzVqYjIwd2dZa0dDaXNHQVFRQjFua0NCQUlFZXdSNUFIY0FkUURkUFRCcXhzY1JNbU1aSGh5WgpaemNDb2twZXVONDhyZitIaW5LQUx5bnVqZ0FBQVlkaS8rUTlBQUFFQXdCR01FUUNJQ1JUcjFId25mbFUrbi9WCmJUc0xmajBpMmhXa2VKZkYrc1FwWW9DbWNMVTNBaUJGTnQ5ak44emtjQ0NuTVhLTjRNR1ZkS0E0eVl4QUNYb3MKMjEwSmh1cU1KekFLQmdncWhrak9QUVFEQXdObkFEQmtBakI2WmNMRU9rbXpXeGd2NVhJUW5aWnNWRk1EcXdlMApOaXk0MkM1cjJ1QWdvcEFtMVEvQk5wTnJqdFFDWmFmd1VMY0NNRStucTByd3dIa3VsREN3SkFDV1pYVUk4TzUvClltNkFjcWwwbWVFaDQwOWVRK1ZJWnpyZDdNckhhcmd0WklaMDV3PT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo="
       }
     }
   }
@@ -360,21 +373,22 @@ from there the base64encoded `publicKey` is what was issued during the [signing 
 
 ```
 -----BEGIN CERTIFICATE-----
-MIICvTCCAkOgAwIBAgIUZqa88FvpduNj4e3+bNuWtsZQiIAwCgYIKoZIzj0EAwMw
+MIIC6DCCAm+gAwIBAgIUX/OgJOXC6oiJAL7HWjFDzqbR6tYwCgYIKoZIzj0EAwMw
 NzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl
-cm1lZGlhdGUwHhcNMjIxMDExMDk1MjI3WhcNMjIxMDExMTAwMjI3WjAAMFkwEwYH
-KoZIzj0CAQYIKoZIzj0DAQcDQgAEk4xZ8kTx0MX0TEEIyAo78w9m01IsDQbV1OiK
-YW8NDYxHzrhYkN+k+gRWoHRw9kC5pvjIdn2hckl2pV1f4qivpaOCAWIwggFeMA4G
-A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQUNZWY
-VXzCK/KUPlIpAa5dPtiKBVAwHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y
-ZD8wPwYDVR0RAQH/BDUwM4ExY29zaWduQGNvc2lnbi10ZXN0LTM2NTIwOS5pYW0u
+cm1lZGlhdGUwHhcNMjMwNDA4MjIzMjI5WhcNMjMwNDA4MjI0MjI5WjAAMFkwEwYH
+KoZIzj0CAQYIKoZIzj0DAQcDQgAELUYtTggCSv3rF+drY5/6Jjfj1QrqbQW7X1gQ
+I1RKG/9hlVe64geJLMBxjMOq7zdvEooebDTr5rS50YC4knyDKKOCAY4wggGKMA4G
+A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQU1kJo
+UGcJPvNfzjCQUm4epVFSLiEwHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y
+ZD8wPwYDVR0RAQH/BDUwM4ExY29zaWduQGNvc2lnbi10ZXN0LTM4MzEyMi5pYW0u
 Z3NlcnZpY2VhY2NvdW50LmNvbTApBgorBgEEAYO/MAEBBBtodHRwczovL2FjY291
-bnRzLmdvb2dsZS5jb20wgYoGCisGAQQB1nkCBAIEfAR6AHgAdgAIYJLwKFL/aEXR
-0WsnhJxFZxisFj3DONJt5rwiBjZvcgAAAYPGdbkUAAAEAwBHMEUCIQCuVIwybmQu
-kTzI4zJplpRkoT43t5bwTFq4P1bhWNxp1AIgUyNxcOBt1AWors2RHtgJzJTH6ib6
-Q+PdUoG7rytgGGswCgYIKoZIzj0EAwMDaAAwZQIwUoUHg3dWENoUmXH79OYQ11ZC
-p/jZd22PFmCgNiCDMiLjuOakGXw8wTPe4MRjAKS2AjEA5dCmqEu9ZiNzYTpI3fAe
-sll8ces39qhegsO2eLxYr+kpXkXO4ZxSi0Cv+rREmiJg
+bnRzLmdvb2dsZS5jb20wKwYKKwYBBAGDvzABCAQdDBtodHRwczovL2FjY291bnRz
+Lmdvb2dsZS5jb20wgYkGCisGAQQB1nkCBAIEewR5AHcAdQDdPTBqxscRMmMZHhyZ
+ZzcCokpeuN48rf+HinKALynujgAAAYdi/+Q9AAAEAwBGMEQCICRTr1HwnflU+n/V
+bTsLfj0i2hWkeJfF+sQpYoCmcLU3AiBFNt9jN8zkcCCnMXKN4MGVdKA4yYxACXos
+210JhuqMJzAKBggqhkjOPQQDAwNnADBkAjB6ZcLEOkmzWxgv5XIQnZZsVFMDqwe0
+Niy42C5r2uAgopAm1Q/BNpNrjtQCZafwULcCME+nq0rwwHkulDCwJACWZXUI8O5/
+Ym6Acql0meEh409eQ+VIZzrd7MrHargtZIZ05w==
 -----END CERTIFICATE-----
 ```
 
@@ -387,22 +401,22 @@ Certificate:
     Data:
         Version: 3 (0x2)
         Serial Number:
-            66:a6:bc:f0:5b:e9:76:e3:63:e1:ed:fe:6c:db:96:b6:c6:50:88:80
+            5f:f3:a0:24:e5:c2:ea:88:89:00:be:c7:5a:31:43:ce:a6:d1:ea:d6
         Signature Algorithm: ecdsa-with-SHA384
         Issuer: O = sigstore.dev, CN = sigstore-intermediate
         Validity
-            Not Before: Oct 11 09:52:27 2022 GMT
-            Not After : Oct 11 10:02:27 2022 GMT
+            Not Before: Apr  8 22:32:29 2023 GMT
+            Not After : Apr  8 22:42:29 2023 GMT
         Subject: 
         Subject Public Key Info:
             Public Key Algorithm: id-ecPublicKey
                 Public-Key: (256 bit)
                 pub:
-                    04:93:8c:59:f2:44:f1:d0:c5:f4:4c:41:08:c8:0a:
-                    3b:f3:0f:66:d3:52:2c:0d:06:d5:d4:e8:8a:61:6f:
-                    0d:0d:8c:47:ce:b8:58:90:df:a4:fa:04:56:a0:74:
-                    70:f6:40:b9:a6:f8:c8:76:7d:a1:72:49:76:a5:5d:
-                    5f:e2:a8:af:a5
+                    04:2d:46:2d:4e:08:02:4a:fd:eb:17:e7:6b:63:9f:
+                    fa:26:37:e3:d5:0a:ea:6d:05:bb:5f:58:10:23:54:
+                    4a:1b:ff:61:95:57:ba:e2:07:89:2c:c0:71:8c:c3:
+                    aa:ef:37:6f:12:8a:1e:6c:34:eb:e6:b4:b9:d1:80:
+                    b8:92:7c:83:28
                 ASN1 OID: prime256v1
                 NIST CURVE: P-256
         X509v3 extensions:
@@ -411,30 +425,39 @@ Certificate:
             X509v3 Extended Key Usage: 
                 Code Signing
             X509v3 Subject Key Identifier: 
-                35:95:98:55:7C:C2:2B:F2:94:3E:52:29:01:AE:5D:3E:D8:8A:05:50
+                D6:42:68:50:67:09:3E:F3:5F:CE:30:90:52:6E:1E:A5:51:52:2E:21
             X509v3 Authority Key Identifier: 
                 DF:D3:E9:CF:56:24:11:96:F9:A8:D8:E9:28:55:A2:C6:2E:18:64:3F
             X509v3 Subject Alternative Name: critical
-                email:cosign@cosign-test-365209.iam.gserviceaccount.com  <<<<<<<<<<<<
+                email:cosign@cosign-test-383122.iam.gserviceaccount.com              <<<<<<<<<<<<<<<<<<
             1.3.6.1.4.1.57264.1.1: 
                 https://accounts.google.com
+            1.3.6.1.4.1.57264.1.8: 
+                ..https://accounts.google.com
             CT Precertificate SCTs: 
                 Signed Certificate Timestamp:
                     Version   : v1 (0x0)
-                    Log ID    : 08:60:92:F0:28:52:FF:68:45:D1:D1:6B:27:84:9C:45:
-                                67:18:AC:16:3D:C3:38:D2:6D:E6:BC:22:06:36:6F:72
-                    Timestamp : Oct 11 09:52:27.412 2022 GMT
+                    Log ID    : DD:3D:30:6A:C6:C7:11:32:63:19:1E:1C:99:67:37:02:
+                                A2:4A:5E:B8:DE:3C:AD:FF:87:8A:72:80:2F:29:EE:8E
+                    Timestamp : Apr  8 22:32:30.013 2023 GMT
                     Extensions: none
                     Signature : ecdsa-with-SHA256
-                                30:45:02:21:00:AE:54:8C:32:6E:64:2E:91:3C:C8:E3:
-                                32:69:96:94:64:A1:3E:37:B7:96:F0:4C:5A:B8:3F:56:
-                                E1:58:DC:69:D4:02:20:53:23:71:70:E0:6D:D4:05:A8:
-                                AE:CD:91:1E:D8:09:CC:94:C7:EA:26:FA:43:E3:DD:52:
-                                81:BB:AF:2B:60:18:6B
+                                30:44:02:20:24:53:AF:51:F0:9D:F9:54:FA:7F:D5:6D:
+                                3B:0B:7E:3D:22:DA:15:A4:78:97:C5:FA:C4:29:62:80:
+                                A6:70:B5:37:02:20:45:36:DF:63:37:CC:E4:70:20:A7:
+                                31:72:8D:E0:C1:95:74:A0:38:C9:8C:40:09:7A:2C:DB:
+                                5D:09:86:EA:8C:27
     Signature Algorithm: ecdsa-with-SHA384
+    Signature Value:
+        30:64:02:30:7a:65:c2:c4:3a:49:b3:5b:18:2f:e5:72:10:9d:
+        96:6c:54:53:03:ab:07:b4:36:2c:b8:d8:2e:6b:da:e0:20:a2:
+        90:26:d5:0f:c1:36:93:6b:8e:d4:02:65:a7:f0:50:b7:02:30:
+        4f:a7:ab:4a:f0:c0:79:2e:94:30:b0:24:00:96:65:75:08:f0:
+        ee:7f:62:6e:80:72:a9:74:99:e1:21:e3:4f:5e:43:e5:48:67:
+        3a:dd:ec:ca:c7:6a:b8:2d:64:86:74:e7
 ```
 
-NOTE the OID `1.3.6.1.4.1.57264.1.1` is registered to [here](https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md#directory) and denotes the OIDC Token's isuser
+NOTE the OID `1.3.6.1.4.1.57264.1.1` is registered to [here](https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md#directory) and denotes the OIDC Token's issuer
 
 Now use `rekor-cli` to search for what we added to the transparency log using
 
@@ -443,10 +466,10 @@ Now use `rekor-cli` to search for what we added to the transparency log using
 
 ```bash
 $ rekor-cli search --rekor_server https://rekor.sigstore.dev \
-   --sha  6bbbedf34d7a00e8be29adc9f473702c57bce2622e17a51ecd42a0540d9ee06f
+   --sha  02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
 
   Found matching entries (listed by UUID):
-  24296fb24b8ad77ae8a9e596d1cc25b01df1b03be9b9f2d91cf971ff04e5d1ada53b5ce55278425b
+  24296fb24b8ad77a613ebee274f1633e776c09e4f9139db7d2342079e0ba59257ce0472ca3ba33ff
 ```
 
 * the email for the build service account's `OIDC`
@@ -455,8 +478,8 @@ $ rekor-cli search --rekor_server https://rekor.sigstore.dev \
 $ rekor-cli search --rekor_server https://rekor.sigstore.dev  --email cosign@$PROJECT_ID.iam.gserviceaccount.com
 
 Found matching entries (listed by UUID):
-24296fb24b8ad77ac921dde21b687cb74c5d447bc22be1695e0f8a804d6b9d4e5678f02f354984fc
-24296fb24b8ad77ae8a9e596d1cc25b01df1b03be9b9f2d91cf971ff04e5d1ada53b5ce55278425b
+24296fb24b8ad77a31b10e4b97faecd20e3fab5192a93a388f183f5109280267cdaa60537878f0eb
+24296fb24b8ad77a613ebee274f1633e776c09e4f9139db7d2342079e0ba59257ce0472ca3ba33ff
 ```
 
 note each `UUID` asserts something different:  the `signature` and another one for the `attestation`
@@ -466,28 +489,28 @@ For the `Signature`
 
 ```
 rekor-cli get --rekor_server https://rekor.sigstore.dev  \
-  --uuid 24296fb24b8ad77ae8a9e596d1cc25b01df1b03be9b9f2d91cf971ff04e5d1ada53b5ce55278425b
+  --uuid 24296fb24b8ad77a613ebee274f1633e776c09e4f9139db7d2342079e0ba59257ce0472ca3ba33ff
 ```
 
 outputs (note the `Index` value matches what we have in the "sign_oidc" build step)
 
 ```text
 LogID: c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
-Index: 4884681
-IntegratedTime: 2022-10-11T09:52:28Z
-UUID: 24296fb24b8ad77ae8a9e596d1cc25b01df1b03be9b9f2d91cf971ff04e5d1ada53b5ce55278425b
+Index: 17475493
+IntegratedTime: 2023-04-08T22:32:31Z
+UUID: 24296fb24b8ad77a613ebee274f1633e776c09e4f9139db7d2342079e0ba59257ce0472ca3ba33ff
 Body: {
   "HashedRekordObj": {
     "data": {
       "hash": {
         "algorithm": "sha256",
-        "value": "6bbbedf34d7a00e8be29adc9f473702c57bce2622e17a51ecd42a0540d9ee06f"
+        "value": "02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce"
       }
     },
     "signature": {
-      "content": "MEUCIQDQ4bfM3Qs/vqE2vN0WE/9rrIalbGogs7D47Vruss3UVgIgRrohukGYmGws/og5Qaat25XgS+pz73VZD3E26ybNHjc=",
+      "content": "MEYCIQDYXlP/p84Gt2N4jczhUx52+BW+G1EUPLuaguLQ8C3GYAIhAO+nSII+gN6KGVEI0Yromod1Vl2C2wRZNhItNKjQPwC9",
       "publicKey": {
-        "content": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUN2VENDQWtPZ0F3SUJBZ0lVWnFhODhGdnBkdU5qNGUzK2JOdVd0c1pRaUlBd0NnWUlLb1pJemowRUF3TXcKTnpFVk1CTUdBMVVFQ2hNTWMybG5jM1J2Y21VdVpHVjJNUjR3SEFZRFZRUURFeFZ6YVdkemRHOXlaUzFwYm5SbApjbTFsWkdsaGRHVXdIaGNOTWpJeE1ERXhNRGsxTWpJM1doY05Nakl4TURFeE1UQXdNakkzV2pBQU1Ga3dFd1lICktvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVrNHhaOGtUeDBNWDBURUVJeUFvNzh3OW0wMUlzRFFiVjFPaUsKWVc4TkRZeEh6cmhZa04raytnUldvSFJ3OWtDNXB2aklkbjJoY2tsMnBWMWY0cWl2cGFPQ0FXSXdnZ0ZlTUE0RwpBMVVkRHdFQi93UUVBd0lIZ0RBVEJnTlZIU1VFRERBS0JnZ3JCZ0VGQlFjREF6QWRCZ05WSFE0RUZnUVVOWldZClZYekNLL0tVUGxJcEFhNWRQdGlLQlZBd0h3WURWUjBqQkJnd0ZvQVUzOVBwejFZa0VaYjVxTmpwS0ZXaXhpNFkKWkQ4d1B3WURWUjBSQVFIL0JEVXdNNEV4WTI5emFXZHVRR052YzJsbmJpMTBaWE4wTFRNMk5USXdPUzVwWVcwdQpaM05sY25acFkyVmhZMk52ZFc1MExtTnZiVEFwQmdvckJnRUVBWU8vTUFFQkJCdG9kSFJ3Y3pvdkwyRmpZMjkxCmJuUnpMbWR2YjJkc1pTNWpiMjB3Z1lvR0Npc0dBUVFCMW5rQ0JBSUVmQVI2QUhnQWRnQUlZSkx3S0ZML2FFWFIKMFdzbmhKeEZaeGlzRmozRE9OSnQ1cndpQmpadmNnQUFBWVBHZGJrVUFBQUVBd0JITUVVQ0lRQ3VWSXd5Ym1RdQprVHpJNHpKcGxwUmtvVDQzdDVid1RGcTRQMWJoV054cDFBSWdVeU54Y09CdDFBV29yczJSSHRnSnpKVEg2aWI2ClErUGRVb0c3cnl0Z0dHc3dDZ1lJS29aSXpqMEVBd01EYUFBd1pRSXdVb1VIZzNkV0VOb1VtWEg3OU9ZUTExWkMKcC9qWmQyMlBGbUNnTmlDRE1pTGp1T2FrR1h3OHdUUGU0TVJqQUtTMkFqRUE1ZENtcUV1OVppTnpZVHBJM2ZBZQpzbGw4Y2VzMzlxaGVnc08yZUx4WXIra3BYa1hPNFp4U2kwQ3YrclJFbWlKZwotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg=="
+        "content": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM2RENDQW0rZ0F3SUJBZ0lVWC9PZ0pPWEM2b2lKQUw3SFdqRkR6cWJSNnRZd0NnWUlLb1pJemowRUF3TXcKTnpFVk1CTUdBMVVFQ2hNTWMybG5jM1J2Y21VdVpHVjJNUjR3SEFZRFZRUURFeFZ6YVdkemRHOXlaUzFwYm5SbApjbTFsWkdsaGRHVXdIaGNOTWpNd05EQTRNakl6TWpJNVdoY05Nak13TkRBNE1qSTBNakk1V2pBQU1Ga3dFd1lICktvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVMVVl0VGdnQ1N2M3JGK2RyWTUvNkpqZmoxUXJxYlFXN1gxZ1EKSTFSS0cvOWhsVmU2NGdlSkxNQnhqTU9xN3pkdkVvb2ViRFRyNXJTNTBZQzRrbnlES0tPQ0FZNHdnZ0dLTUE0RwpBMVVkRHdFQi93UUVBd0lIZ0RBVEJnTlZIU1VFRERBS0JnZ3JCZ0VGQlFjREF6QWRCZ05WSFE0RUZnUVUxa0pvClVHY0pQdk5mempDUVVtNGVwVkZTTGlFd0h3WURWUjBqQkJnd0ZvQVUzOVBwejFZa0VaYjVxTmpwS0ZXaXhpNFkKWkQ4d1B3WURWUjBSQVFIL0JEVXdNNEV4WTI5emFXZHVRR052YzJsbmJpMTBaWE4wTFRNNE16RXlNaTVwWVcwdQpaM05sY25acFkyVmhZMk52ZFc1MExtTnZiVEFwQmdvckJnRUVBWU8vTUFFQkJCdG9kSFJ3Y3pvdkwyRmpZMjkxCmJuUnpMbWR2YjJkc1pTNWpiMjB3S3dZS0t3WUJCQUdEdnpBQkNBUWREQnRvZEhSd2N6b3ZMMkZqWTI5MWJuUnoKTG1kdmIyZHNaUzVqYjIwd2dZa0dDaXNHQVFRQjFua0NCQUlFZXdSNUFIY0FkUURkUFRCcXhzY1JNbU1aSGh5WgpaemNDb2twZXVONDhyZitIaW5LQUx5bnVqZ0FBQVlkaS8rUTlBQUFFQXdCR01FUUNJQ1JUcjFId25mbFUrbi9WCmJUc0xmajBpMmhXa2VKZkYrc1FwWW9DbWNMVTNBaUJGTnQ5ak44emtjQ0NuTVhLTjRNR1ZkS0E0eVl4QUNYb3MKMjEwSmh1cU1KekFLQmdncWhrak9QUVFEQXdObkFEQmtBakI2WmNMRU9rbXpXeGd2NVhJUW5aWnNWRk1EcXdlMApOaXk0MkM1cjJ1QWdvcEFtMVEvQk5wTnJqdFFDWmFmd1VMY0NNRStucTByd3dIa3VsREN3SkFDV1pYVUk4TzUvClltNkFjcWwwbWVFaDQwOWVRK1ZJWnpyZDdNckhhcmd0WklaMDV3PT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo="
       }
     }
   }
@@ -498,21 +521,22 @@ the certificate from the decoded publicKey outputs the cert issued by falcio
 
 ```
 -----BEGIN CERTIFICATE-----
-MIICvTCCAkOgAwIBAgIUZqa88FvpduNj4e3+bNuWtsZQiIAwCgYIKoZIzj0EAwMw
+MIIC6DCCAm+gAwIBAgIUX/OgJOXC6oiJAL7HWjFDzqbR6tYwCgYIKoZIzj0EAwMw
 NzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl
-cm1lZGlhdGUwHhcNMjIxMDExMDk1MjI3WhcNMjIxMDExMTAwMjI3WjAAMFkwEwYH
-KoZIzj0CAQYIKoZIzj0DAQcDQgAEk4xZ8kTx0MX0TEEIyAo78w9m01IsDQbV1OiK
-YW8NDYxHzrhYkN+k+gRWoHRw9kC5pvjIdn2hckl2pV1f4qivpaOCAWIwggFeMA4G
-A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQUNZWY
-VXzCK/KUPlIpAa5dPtiKBVAwHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y
-ZD8wPwYDVR0RAQH/BDUwM4ExY29zaWduQGNvc2lnbi10ZXN0LTM2NTIwOS5pYW0u
+cm1lZGlhdGUwHhcNMjMwNDA4MjIzMjI5WhcNMjMwNDA4MjI0MjI5WjAAMFkwEwYH
+KoZIzj0CAQYIKoZIzj0DAQcDQgAELUYtTggCSv3rF+drY5/6Jjfj1QrqbQW7X1gQ
+I1RKG/9hlVe64geJLMBxjMOq7zdvEooebDTr5rS50YC4knyDKKOCAY4wggGKMA4G
+A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQU1kJo
+UGcJPvNfzjCQUm4epVFSLiEwHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y
+ZD8wPwYDVR0RAQH/BDUwM4ExY29zaWduQGNvc2lnbi10ZXN0LTM4MzEyMi5pYW0u
 Z3NlcnZpY2VhY2NvdW50LmNvbTApBgorBgEEAYO/MAEBBBtodHRwczovL2FjY291
-bnRzLmdvb2dsZS5jb20wgYoGCisGAQQB1nkCBAIEfAR6AHgAdgAIYJLwKFL/aEXR
-0WsnhJxFZxisFj3DONJt5rwiBjZvcgAAAYPGdbkUAAAEAwBHMEUCIQCuVIwybmQu
-kTzI4zJplpRkoT43t5bwTFq4P1bhWNxp1AIgUyNxcOBt1AWors2RHtgJzJTH6ib6
-Q+PdUoG7rytgGGswCgYIKoZIzj0EAwMDaAAwZQIwUoUHg3dWENoUmXH79OYQ11ZC
-p/jZd22PFmCgNiCDMiLjuOakGXw8wTPe4MRjAKS2AjEA5dCmqEu9ZiNzYTpI3fAe
-sll8ces39qhegsO2eLxYr+kpXkXO4ZxSi0Cv+rREmiJg
+bnRzLmdvb2dsZS5jb20wKwYKKwYBBAGDvzABCAQdDBtodHRwczovL2FjY291bnRz
+Lmdvb2dsZS5jb20wgYkGCisGAQQB1nkCBAIEewR5AHcAdQDdPTBqxscRMmMZHhyZ
+ZzcCokpeuN48rf+HinKALynujgAAAYdi/+Q9AAAEAwBGMEQCICRTr1HwnflU+n/V
+bTsLfj0i2hWkeJfF+sQpYoCmcLU3AiBFNt9jN8zkcCCnMXKN4MGVdKA4yYxACXos
+210JhuqMJzAKBggqhkjOPQQDAwNnADBkAjB6ZcLEOkmzWxgv5XIQnZZsVFMDqwe0
+Niy42C5r2uAgopAm1Q/BNpNrjtQCZafwULcCME+nq0rwwHkulDCwJACWZXUI8O5/
+Ym6Acql0meEh409eQ+VIZzrd7MrHargtZIZ05w==
 -----END CERTIFICATE-----
 
 
@@ -522,22 +546,22 @@ Certificate:
     Data:
         Version: 3 (0x2)
         Serial Number:
-            66:a6:bc:f0:5b:e9:76:e3:63:e1:ed:fe:6c:db:96:b6:c6:50:88:80
+            5f:f3:a0:24:e5:c2:ea:88:89:00:be:c7:5a:31:43:ce:a6:d1:ea:d6
         Signature Algorithm: ecdsa-with-SHA384
         Issuer: O = sigstore.dev, CN = sigstore-intermediate
         Validity
-            Not Before: Oct 11 09:52:27 2022 GMT
-            Not After : Oct 11 10:02:27 2022 GMT
+            Not Before: Apr  8 22:32:29 2023 GMT
+            Not After : Apr  8 22:42:29 2023 GMT
         Subject: 
         Subject Public Key Info:
             Public Key Algorithm: id-ecPublicKey
                 Public-Key: (256 bit)
                 pub:
-                    04:93:8c:59:f2:44:f1:d0:c5:f4:4c:41:08:c8:0a:
-                    3b:f3:0f:66:d3:52:2c:0d:06:d5:d4:e8:8a:61:6f:
-                    0d:0d:8c:47:ce:b8:58:90:df:a4:fa:04:56:a0:74:
-                    70:f6:40:b9:a6:f8:c8:76:7d:a1:72:49:76:a5:5d:
-                    5f:e2:a8:af:a5
+                    04:2d:46:2d:4e:08:02:4a:fd:eb:17:e7:6b:63:9f:
+                    fa:26:37:e3:d5:0a:ea:6d:05:bb:5f:58:10:23:54:
+                    4a:1b:ff:61:95:57:ba:e2:07:89:2c:c0:71:8c:c3:
+                    aa:ef:37:6f:12:8a:1e:6c:34:eb:e6:b4:b9:d1:80:
+                    b8:92:7c:83:28
                 ASN1 OID: prime256v1
                 NIST CURVE: P-256
         X509v3 extensions:
@@ -546,28 +570,36 @@ Certificate:
             X509v3 Extended Key Usage: 
                 Code Signing
             X509v3 Subject Key Identifier: 
-                35:95:98:55:7C:C2:2B:F2:94:3E:52:29:01:AE:5D:3E:D8:8A:05:50
+                D6:42:68:50:67:09:3E:F3:5F:CE:30:90:52:6E:1E:A5:51:52:2E:21
             X509v3 Authority Key Identifier: 
                 DF:D3:E9:CF:56:24:11:96:F9:A8:D8:E9:28:55:A2:C6:2E:18:64:3F
             X509v3 Subject Alternative Name: critical
-                email:cosign@cosign-test-365209.iam.gserviceaccount.com  <<<<<<<<<<<<<
+                email:cosign@cosign-test-383122.iam.gserviceaccount.com            <<<<<<<<<
             1.3.6.1.4.1.57264.1.1: 
                 https://accounts.google.com
+            1.3.6.1.4.1.57264.1.8: 
+                ..https://accounts.google.com
             CT Precertificate SCTs: 
                 Signed Certificate Timestamp:
                     Version   : v1 (0x0)
-                    Log ID    : 08:60:92:F0:28:52:FF:68:45:D1:D1:6B:27:84:9C:45:
-                                67:18:AC:16:3D:C3:38:D2:6D:E6:BC:22:06:36:6F:72
-                    Timestamp : Oct 11 09:52:27.412 2022 GMT
+                    Log ID    : DD:3D:30:6A:C6:C7:11:32:63:19:1E:1C:99:67:37:02:
+                                A2:4A:5E:B8:DE:3C:AD:FF:87:8A:72:80:2F:29:EE:8E
+                    Timestamp : Apr  8 22:32:30.013 2023 GMT
                     Extensions: none
                     Signature : ecdsa-with-SHA256
-                                30:45:02:21:00:AE:54:8C:32:6E:64:2E:91:3C:C8:E3:
-                                32:69:96:94:64:A1:3E:37:B7:96:F0:4C:5A:B8:3F:56:
-                                E1:58:DC:69:D4:02:20:53:23:71:70:E0:6D:D4:05:A8:
-                                AE:CD:91:1E:D8:09:CC:94:C7:EA:26:FA:43:E3:DD:52:
-                                81:BB:AF:2B:60:18:6B
+                                30:44:02:20:24:53:AF:51:F0:9D:F9:54:FA:7F:D5:6D:
+                                3B:0B:7E:3D:22:DA:15:A4:78:97:C5:FA:C4:29:62:80:
+                                A6:70:B5:37:02:20:45:36:DF:63:37:CC:E4:70:20:A7:
+                                31:72:8D:E0:C1:95:74:A0:38:C9:8C:40:09:7A:2C:DB:
+                                5D:09:86:EA:8C:27
     Signature Algorithm: ecdsa-with-SHA384
-
+    Signature Value:
+        30:64:02:30:7a:65:c2:c4:3a:49:b3:5b:18:2f:e5:72:10:9d:
+        96:6c:54:53:03:ab:07:b4:36:2c:b8:d8:2e:6b:da:e0:20:a2:
+        90:26:d5:0f:c1:36:93:6b:8e:d4:02:65:a7:f0:50:b7:02:30:
+        4f:a7:ab:4a:f0:c0:79:2e:94:30:b0:24:00:96:65:75:08:f0:
+        ee:7f:62:6e:80:72:a9:74:99:e1:21:e3:4f:5e:43:e5:48:67:
+        3a:dd:ec:ca:c7:6a:b8:2d:64:86:74:e7
 ```
 
 
@@ -575,30 +607,30 @@ for the `Attestation`
 
 ```bash
 rekor-cli get --rekor_server https://rekor.sigstore.dev \
-   --uuid 24296fb24b8ad77ac921dde21b687cb74c5d447bc22be1695e0f8a804d6b9d4e5678f02f354984fc
+   --uuid 24296fb24b8ad77a31b10e4b97faecd20e3fab5192a93a388f183f5109280267cdaa60537878f0eb
 ```
 
 gives (again, note the attestations and `Index` that matches the "attest_oidc" step)
 
 ```text
 LogID: c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
-Attestation: {"_type":"https://in-toto.io/Statement/v0.1","predicateType":"cosign.sigstore.dev/attestation/v1","subject":[{"name":"us-central1-docker.pkg.dev/cosign-test-365209/repo1/myimage","digest":{"sha256":"83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753"}}],"predicate":{"Data":"{ \"projectid\": \"cosign-test-365209\", \"buildid\": \"0594f2e5-f600-48db-8aa2-daf58ee1acb5\", \"foo\":\"bar\", \"commitsha\": \"dd93e9e893ffaf2c4cafeb2e534bf03f66d7bf28\" }","Timestamp":"2022-10-11T09:52:30Z"}}
-Index: 4884684
-IntegratedTime: 2022-10-11T09:52:30Z
-UUID: 24296fb24b8ad77ac921dde21b687cb74c5d447bc22be1695e0f8a804d6b9d4e5678f02f354984fc
+Attestation: {"_type":"https://in-toto.io/Statement/v0.1","predicateType":"cosign.sigstore.dev/attestation/v1","subject":[{"name":"us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild","digest":{"sha256":"5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52"}}],"predicate":{"Data":"{ \"projectid\": \"cosign-test-383122\", \"buildid\": \"0a774360-d57e-41af-af8b-76dd4109c47c\", \"foo\":\"bar\", \"commitsha\": \"52dc8c1979d7e6b56a5a253dbd79028842752b08\" }","Timestamp":"2023-04-08T22:32:34Z"}}
+Index: 17475497
+IntegratedTime: 2023-04-08T22:32:35Z
+UUID: 24296fb24b8ad77a31b10e4b97faecd20e3fab5192a93a388f183f5109280267cdaa60537878f0eb
 Body: {
   "IntotoObj": {
     "content": {
       "hash": {
         "algorithm": "sha256",
-        "value": "0f423022b98d7a9147d52708e1c0cfa314e1825da4e7c1acfec6b37b463c6fc9"
+        "value": "b13908ecec6666c94a7ed985f51dab3dd42f24fa64650f247db270f9d89f2d79"
       },
       "payloadHash": {
         "algorithm": "sha256",
-        "value": "66c1bccfea7611934df3b67cf6c660d0120fbad40bcbccad4db940d463e62188"
+        "value": "18b33fdbf413ab8b5d08a1926754787ccffdc0a65695b01b11247900604d039a"
       }
     },
-    "publicKey": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUN2VENDQWtPZ0F3SUJBZ0lVUEZzMXZ2S1pwVFRMMlFvQlJNTU1vQmVub3N3d0NnWUlLb1pJemowRUF3TXcKTnpFVk1CTUdBMVVFQ2hNTWMybG5jM1J2Y21VdVpHVjJNUjR3SEFZRFZRUURFeFZ6YVdkemRHOXlaUzFwYm5SbApjbTFsWkdsaGRHVXdIaGNOTWpJeE1ERXhNRGsxTWpJNVdoY05Nakl4TURFeE1UQXdNakk1V2pBQU1Ga3dFd1lICktvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVVcmpDSjFhMjFBNWUrOFQrUDFTYjh0QjRrejZ0L1hXUWZwYVQKK0x1RXZtSXFLc2VNUGlOQ1hsUTBjdUpETUJDUFZPdnF6R0dQWGwyendRU0JaRnRPc0tPQ0FXSXdnZ0ZlTUE0RwpBMVVkRHdFQi93UUVBd0lIZ0RBVEJnTlZIU1VFRERBS0JnZ3JCZ0VGQlFjREF6QWRCZ05WSFE0RUZnUVVtQmo1CnNjdnR4WURjcmRYT0N6b0NkeXB0ajUwd0h3WURWUjBqQkJnd0ZvQVUzOVBwejFZa0VaYjVxTmpwS0ZXaXhpNFkKWkQ4d1B3WURWUjBSQVFIL0JEVXdNNEV4WTI5emFXZHVRR052YzJsbmJpMTBaWE4wTFRNMk5USXdPUzVwWVcwdQpaM05sY25acFkyVmhZMk52ZFc1MExtTnZiVEFwQmdvckJnRUVBWU8vTUFFQkJCdG9kSFJ3Y3pvdkwyRmpZMjkxCmJuUnpMbWR2YjJkc1pTNWpiMjB3Z1lvR0Npc0dBUVFCMW5rQ0JBSUVmQVI2QUhnQWRnQUlZSkx3S0ZML2FFWFIKMFdzbmhKeEZaeGlzRmozRE9OSnQ1cndpQmpadmNnQUFBWVBHZGNJSEFBQUVBd0JITUVVQ0lFUndFMExRWERKawo3R2VpcTREOXZwbnNjbWhMNUkvaWNFdW4ra1A1L3B4S0FpRUF1eEpTTjR6UGxZcWQ3aGJkSXRjdUVMajNiL2pjCjcxOHBEL3k2b281eTdsVXdDZ1lJS29aSXpqMEVBd01EYUFBd1pRSXhBTXQwUXBFZVFyam9vRXg3TEtMVXRTamEKTUNDenFjK1FrZDFpMkR4ZVQ2Tm9iNm9xbzlpendPVUVwT0Rna1ByZDBnSXdibnlMbWREZXRxN2pTcks5NGVwNAowbm83QmNuczc0MDROWGN2WFpNR1FpNjRwbVRIVW1jMHVRSXhyMDBWU0dWZgotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg=="
+    "publicKey": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM2VENDQW5DZ0F3SUJBZ0lVS0ZleXk4L2NHYjBmUHN5M1VPWDRnSzFkMVlnd0NnWUlLb1pJemowRUF3TXcKTnpFVk1CTUdBMVVFQ2hNTWMybG5jM1J2Y21VdVpHVjJNUjR3SEFZRFZRUURFeFZ6YVdkemRHOXlaUzFwYm5SbApjbTFsWkdsaGRHVXdIaGNOTWpNd05EQTRNakl6TWpNMFdoY05Nak13TkRBNE1qSTBNak0wV2pBQU1Ga3dFd1lICktvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVld3JQVGVmaDBWMDExbWs3d2ZEdjViQ2xRMTNpckF1MWNqUDMKZm9HV0tXcVV5NkN6TjI1Tk1vRTczSFpMaWJIK0Y1S0tuV2xFYVhab1N3ZHlCWU10OWFPQ0FZOHdnZ0dMTUE0RwpBMVVkRHdFQi93UUVBd0lIZ0RBVEJnTlZIU1VFRERBS0JnZ3JCZ0VGQlFjREF6QWRCZ05WSFE0RUZnUVUyR2ljCjNUMVgxQXZuaVlUVW9TZHJmOVJOMGJBd0h3WURWUjBqQkJnd0ZvQVUzOVBwejFZa0VaYjVxTmpwS0ZXaXhpNFkKWkQ4d1B3WURWUjBSQVFIL0JEVXdNNEV4WTI5emFXZHVRR052YzJsbmJpMTBaWE4wTFRNNE16RXlNaTVwWVcwdQpaM05sY25acFkyVmhZMk52ZFc1MExtTnZiVEFwQmdvckJnRUVBWU8vTUFFQkJCdG9kSFJ3Y3pvdkwyRmpZMjkxCmJuUnpMbWR2YjJkc1pTNWpiMjB3S3dZS0t3WUJCQUdEdnpBQkNBUWREQnRvZEhSd2N6b3ZMMkZqWTI5MWJuUnoKTG1kdmIyZHNaUzVqYjIwd2dZb0dDaXNHQVFRQjFua0NCQUlFZkFSNkFIZ0FkZ0RkUFRCcXhzY1JNbU1aSGh5WgpaemNDb2twZXVONDhyZitIaW5LQUx5bnVqZ0FBQVlkaS8vVkFBQUFFQXdCSE1FVUNJRkdKRUZiWmlrQ0RPcWgwClc4eHJpVzBVL1o1Vm9MditmSWRYeTJpMHRaZkJBaUVBM2NRMnlCRzIzVDIzVzFaRSswM2JTR254UmFTcVdGbCsKUEdBVnlES1FweEV3Q2dZSUtvWkl6ajBFQXdNRFp3QXdaQUl3YTJDZWZwMGZTWEo3Tk14N0xSS0R5YUZZRElmVwo1amRUaXNrNmZFckJLS0Q2c2l1TlB3Q0o1SWZKeVNGTm11b1pBakF6QldPc2FRbGp2V0NyK0l4S0xGME9UZEttCmhBSXdLcVFCREFzK2Z3VDkzbHZVQVczM2hTUCs0dE55MC85ZUJKST0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo="
   }
 }
 ```
@@ -624,28 +656,26 @@ MCCzqc+Qkd1i2DxeT6Nob6oqo9izwOUEpODgkPrd0gIwbnyLmdDetq7jSrK94ep4
 0no7Bcns7404NXcvXZMGQi64pmTHUmc0uQIxr00VSGVf
 -----END CERTIFICATE-----
 
-
-
 Certificate:
     Data:
         Version: 3 (0x2)
         Serial Number:
-            3c:5b:35:be:f2:99:a5:34:cb:d9:0a:01:44:c3:0c:a0:17:a7:a2:cc
+            28:57:b2:cb:cf:dc:19:bd:1f:3e:cc:b7:50:e5:f8:80:ad:5d:d5:88
         Signature Algorithm: ecdsa-with-SHA384
         Issuer: O = sigstore.dev, CN = sigstore-intermediate
         Validity
-            Not Before: Oct 11 09:52:29 2022 GMT
-            Not After : Oct 11 10:02:29 2022 GMT
+            Not Before: Apr  8 22:32:34 2023 GMT
+            Not After : Apr  8 22:42:34 2023 GMT
         Subject: 
         Subject Public Key Info:
             Public Key Algorithm: id-ecPublicKey
                 Public-Key: (256 bit)
                 pub:
-                    04:52:b8:c2:27:56:b6:d4:0e:5e:fb:c4:fe:3f:54:
-                    9b:f2:d0:78:93:3e:ad:fd:75:90:7e:96:93:f8:bb:
-                    84:be:62:2a:2a:c7:8c:3e:23:42:5e:54:34:72:e2:
-                    43:30:10:8f:54:eb:ea:cc:61:8f:5e:5d:b3:c1:04:
-                    81:64:5b:4e:b0
+                    04:7b:0a:cf:4d:e7:e1:d1:5d:35:d6:69:3b:c1:f0:
+                    ef:e5:b0:a5:43:5d:e2:ac:0b:b5:72:33:f7:7e:81:
+                    96:29:6a:94:cb:a0:b3:37:6e:4d:32:81:3b:dc:76:
+                    4b:89:b1:fe:17:92:8a:9d:69:44:69:76:68:4b:07:
+                    72:05:83:2d:f5
                 ASN1 OID: prime256v1
                 NIST CURVE: P-256
         X509v3 extensions:
@@ -654,28 +684,36 @@ Certificate:
             X509v3 Extended Key Usage: 
                 Code Signing
             X509v3 Subject Key Identifier: 
-                98:18:F9:B1:CB:ED:C5:80:DC:AD:D5:CE:0B:3A:02:77:2A:6D:8F:9D
+                D8:68:9C:DD:3D:57:D4:0B:E7:89:84:D4:A1:27:6B:7F:D4:4D:D1:B0
             X509v3 Authority Key Identifier: 
                 DF:D3:E9:CF:56:24:11:96:F9:A8:D8:E9:28:55:A2:C6:2E:18:64:3F
             X509v3 Subject Alternative Name: critical
-                email:cosign@cosign-test-365209.iam.gserviceaccount.com
+                email:cosign@cosign-test-383122.iam.gserviceaccount.com             <<<<<<
             1.3.6.1.4.1.57264.1.1: 
                 https://accounts.google.com
+            1.3.6.1.4.1.57264.1.8: 
+                ..https://accounts.google.com
             CT Precertificate SCTs: 
                 Signed Certificate Timestamp:
                     Version   : v1 (0x0)
-                    Log ID    : 08:60:92:F0:28:52:FF:68:45:D1:D1:6B:27:84:9C:45:
-                                67:18:AC:16:3D:C3:38:D2:6D:E6:BC:22:06:36:6F:72
-                    Timestamp : Oct 11 09:52:29.703 2022 GMT
+                    Log ID    : DD:3D:30:6A:C6:C7:11:32:63:19:1E:1C:99:67:37:02:
+                                A2:4A:5E:B8:DE:3C:AD:FF:87:8A:72:80:2F:29:EE:8E
+                    Timestamp : Apr  8 22:32:34.368 2023 GMT
                     Extensions: none
                     Signature : ecdsa-with-SHA256
-                                30:45:02:20:44:70:13:42:D0:5C:32:64:EC:67:A2:AB:
-                                80:FD:BE:99:EC:72:68:4B:E4:8F:E2:70:4B:A7:FA:43:
-                                F9:FE:9C:4A:02:21:00:BB:12:52:37:8C:CF:95:8A:9D:
-                                EE:16:DD:22:D7:2E:10:B8:F7:6F:F8:DC:EF:5F:29:0F:
-                                FC:BA:A2:8E:72:EE:55
+                                30:45:02:20:51:89:10:56:D9:8A:40:83:3A:A8:74:5B:
+                                CC:6B:89:6D:14:FD:9E:55:A0:BB:FE:7C:87:57:CB:68:
+                                B4:B5:97:C1:02:21:00:DD:C4:36:C8:11:B6:DD:3D:B7:
+                                5B:56:44:FB:4D:DB:48:69:F1:45:A4:AA:58:59:7E:3C:
+                                60:15:C8:32:90:A7:11
     Signature Algorithm: ecdsa-with-SHA384
-
+    Signature Value:
+        30:64:02:30:6b:60:9e:7e:9d:1f:49:72:7b:34:cc:7b:2d:12:
+        83:c9:a1:58:0c:87:d6:e6:37:53:8a:c9:3a:7c:4a:c1:28:a0:
+        fa:b2:2b:8d:3f:00:89:e4:87:c9:c9:21:4d:9a:ea:19:02:30:
+        33:05:63:ac:69:09:63:bd:60:ab:f8:8c:4a:2c:5d:0e:4d:d2:
+        a6:84:02:30:2a:a4:01:0c:0b:3e:7f:04:fd:de:5b:d4:01:6d:
+        f7:85:23:fe:e2:d3:72:d3:ff:5e:04:92
 ```
 
 
@@ -691,7 +729,7 @@ You'll see the two signatures (one for KMS, another larger one for the OIDC sign
 ```text
 # go install github.com/google/go-containerregistry/cmd/crane@latest
 
-$ crane  manifest us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sig | jq '.'
+$ crane  manifest us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sig | jq '.'
 
 
 {
@@ -700,25 +738,25 @@ $ crane  manifest us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage:sha256-83
   "config": {
     "mediaType": "application/vnd.oci.image.config.v1+json",
     "size": 352,
-    "digest": "sha256:985d55dde83f5fd0390dd4a22c3bfcb5d0d2983a432ece395550f2906f06c530"
+    "digest": "sha256:526fa1b18d988772604ef82c1e26b48e628e1c113c538f66446f350c68a7a8a9"
   },
   "layers": [
     {
       "mediaType": "application/vnd.dev.cosign.simplesigning.v1+json",
-      "size": 288,
-      "digest": "sha256:6bbbedf34d7a00e8be29adc9f473702c57bce2622e17a51ecd42a0540d9ee06f",
+      "size": 292,
+      "digest": "sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce",
       "annotations": {
-        "dev.cosignproject.cosign/signature": "MEUCIBpi56lVbUtelTvHfPSX+2pubeYSMUEV+SsXjUR2eKmoAiEA3/27jrQIfDr1kG+5omzBIVUXoAgPlKMYGkM1vA/Oi8Y="
+        "dev.cosignproject.cosign/signature": "MEYCIQDtwWrh87dfPpw+jqmnYdffSEdrEZ3+TNrxhdSeJDZq7wIhAN1pdzfBUDygKMX2ZecEnM/zHp2SOfc2kJ9kXxKCIuJs"
       }
     },
     {
       "mediaType": "application/vnd.dev.cosign.simplesigning.v1+json",
-      "size": 288,
-      "digest": "sha256:6bbbedf34d7a00e8be29adc9f473702c57bce2622e17a51ecd42a0540d9ee06f",
+      "size": 292,
+      "digest": "sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce",
       "annotations": {
-        "dev.cosignproject.cosign/signature": "MEUCIQDQ4bfM3Qs/vqE2vN0WE/9rrIalbGogs7D47Vruss3UVgIgRrohukGYmGws/og5Qaat25XgS+pz73VZD3E26ybNHjc=",
-        "dev.sigstore.cosign/bundle": "{\"SignedEntryTimestamp\":\"MEUCIGHZnUTc/IllmCsm0l/UYzxqyWWAcqMvPDM+uN6pNhBJAiEA/wZQxTTrjg76HMH5HnUU422/3MyDOgkfxVlEpRlHUYM=\",\"Payload\":{\"body\":\"eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoiaGFzaGVkcmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiI2YmJiZWRmMzRkN2EwMGU4YmUyOWFkYzlmNDczNzAyYzU3YmNlMjYyMmUxN2E1MWVjZDQyYTA1NDBkOWVlMDZmIn19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FVUNJUURRNGJmTTNRcy92cUUydk4wV0UvOXJySWFsYkdvZ3M3RDQ3VnJ1c3MzVVZnSWdScm9odWtHWW1Hd3Mvb2c1UWFhdDI1WGdTK3B6NzNWWkQzRTI2eWJOSGpjPSIsInB1YmxpY0tleSI6eyJjb250ZW50IjoiTFMwdExTMUNSVWRKVGlCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2sxSlNVTjJWRU5EUVd0UFowRjNTVUpCWjBsVlduRmhPRGhHZG5Ca2RVNXFOR1V6SzJKT2RWZDBjMXBSYVVsQmQwTm5XVWxMYjFwSmVtb3dSVUYzVFhjS1RucEZWazFDVFVkQk1WVkZRMmhOVFdNeWJHNWpNMUoyWTIxVmRWcEhWakpOVWpSM1NFRlpSRlpSVVVSRmVGWjZZVmRrZW1SSE9YbGFVekZ3WW01U2JBcGpiVEZzV2tkc2FHUkhWWGRJYUdOT1RXcEplRTFFUlhoTlJHc3hUV3BKTTFkb1kwNU5ha2w0VFVSRmVFMVVRWGROYWtrelYycEJRVTFHYTNkRmQxbElDa3R2V2tsNmFqQkRRVkZaU1V0dldrbDZhakJFUVZGalJGRm5RVVZyTkhoYU9HdFVlREJOV0RCVVJVVkplVUZ2TnpoM09XMHdNVWx6UkZGaVZqRlBhVXNLV1ZjNFRrUlplRWg2Y21oWmEwNHJheXRuVWxkdlNGSjNPV3RETlhCMmFrbGtiakpvWTJ0c01uQldNV1kwY1dsMmNHRlBRMEZYU1hkblowWmxUVUUwUndwQk1WVmtSSGRGUWk5M1VVVkJkMGxJWjBSQlZFSm5UbFpJVTFWRlJFUkJTMEpuWjNKQ1owVkdRbEZqUkVGNlFXUkNaMDVXU0ZFMFJVWm5VVlZPV2xkWkNsWllla05MTDB0VlVHeEpjRUZoTldSUWRHbExRbFpCZDBoM1dVUldVakJxUWtKbmQwWnZRVlV6T1ZCd2VqRlphMFZhWWpWeFRtcHdTMFpYYVhocE5Ga0tXa1E0ZDFCM1dVUldVakJTUVZGSUwwSkVWWGROTkVWNFdUSTVlbUZYWkhWUlIwNTJZekpzYm1KcE1UQmFXRTR3VEZSTk1rNVVTWGRQVXpWd1dWY3dkUXBhTTA1c1kyNWFjRmt5Vm1oWk1rNTJaRmMxTUV4dFRuWmlWRUZ3UW1kdmNrSm5SVVZCV1U4dlRVRkZRa0pDZEc5a1NGSjNZM3B2ZGt3eVJtcFpNamt4Q21KdVVucE1iV1IyWWpKa2MxcFROV3BpTWpCM1oxbHZSME5wYzBkQlVWRkNNVzVyUTBKQlNVVm1RVkkyUVVoblFXUm5RVWxaU2t4M1MwWk1MMkZGV0ZJS01GZHpibWhLZUVaYWVHbHpSbW96UkU5T1NuUTFjbmRwUW1wYWRtTm5RVUZCV1ZCSFpHSnJWVUZCUVVWQmQwSklUVVZWUTBsUlEzVldTWGQ1WW0xUmRRcHJWSHBKTkhwS2NHeHdVbXR2VkRRemREVmlkMVJHY1RSUU1XSm9WMDU0Y0RGQlNXZFZlVTU0WTA5Q2RERkJWMjl5Y3pKU1NIUm5TbnBLVkVnMmFXSTJDbEVyVUdSVmIwYzNjbmwwWjBkSGMzZERaMWxKUzI5YVNYcHFNRVZCZDAxRVlVRkJkMXBSU1hkVmIxVklaek5rVjBWT2IxVnRXRWczT1U5WlVURXhXa01LY0M5cVdtUXlNbEJHYlVOblRtbERSRTFwVEdwMVQyRnJSMWgzT0hkVVVHVTBUVkpxUVV0VE1rRnFSVUUxWkVOdGNVVjFPVnBwVG5wWlZIQkpNMlpCWlFwemJHdzRZMlZ6TXpseGFHVm5jMDh5WlV4NFdYSXJhM0JZYTFoUE5GcDRVMmt3UTNZcmNsSkZiV2xLWndvdExTMHRMVVZPUkNCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2c9PSJ9fX19\",\"integratedTime\":1665481948,\"logIndex\":4884681,\"logID\":\"c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d\"}}",
-        "dev.sigstore.cosign/certificate": "-----BEGIN CERTIFICATE-----\nMIICvTCCAkOgAwIBAgIUZqa88FvpduNj4e3+bNuWtsZQiIAwCgYIKoZIzj0EAwMw\nNzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl\ncm1lZGlhdGUwHhcNMjIxMDExMDk1MjI3WhcNMjIxMDExMTAwMjI3WjAAMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAEk4xZ8kTx0MX0TEEIyAo78w9m01IsDQbV1OiK\nYW8NDYxHzrhYkN+k+gRWoHRw9kC5pvjIdn2hckl2pV1f4qivpaOCAWIwggFeMA4G\nA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQUNZWY\nVXzCK/KUPlIpAa5dPtiKBVAwHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y\nZD8wPwYDVR0RAQH/BDUwM4ExY29zaWduQGNvc2lnbi10ZXN0LTM2NTIwOS5pYW0u\nZ3NlcnZpY2VhY2NvdW50LmNvbTApBgorBgEEAYO/MAEBBBtodHRwczovL2FjY291\nbnRzLmdvb2dsZS5jb20wgYoGCisGAQQB1nkCBAIEfAR6AHgAdgAIYJLwKFL/aEXR\n0WsnhJxFZxisFj3DONJt5rwiBjZvcgAAAYPGdbkUAAAEAwBHMEUCIQCuVIwybmQu\nkTzI4zJplpRkoT43t5bwTFq4P1bhWNxp1AIgUyNxcOBt1AWors2RHtgJzJTH6ib6\nQ+PdUoG7rytgGGswCgYIKoZIzj0EAwMDaAAwZQIwUoUHg3dWENoUmXH79OYQ11ZC\np/jZd22PFmCgNiCDMiLjuOakGXw8wTPe4MRjAKS2AjEA5dCmqEu9ZiNzYTpI3fAe\nsll8ces39qhegsO2eLxYr+kpXkXO4ZxSi0Cv+rREmiJg\n-----END CERTIFICATE-----\n",
+        "dev.cosignproject.cosign/signature": "MEYCIQDYXlP/p84Gt2N4jczhUx52+BW+G1EUPLuaguLQ8C3GYAIhAO+nSII+gN6KGVEI0Yromod1Vl2C2wRZNhItNKjQPwC9",
+        "dev.sigstore.cosign/bundle": "{\"SignedEntryTimestamp\":\"MEUCIGeSCe6KjjOewSm74+gj6mnyUlEte051cRtfHfKTM4C5AiEA5SSCDnViFXf2qzqcdtfnlhAKa5L9G7OyRY5khBht5Kc=\",\"Payload\":{\"body\":\"eyJhcGlWZXJzaW9uIjoiMC4wLjEiLCJraW5kIjoiaGFzaGVkcmVrb3JkIiwic3BlYyI6eyJkYXRhIjp7Imhhc2giOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiIwMjI3NzE4MWNmOGY4MmE5MTdmMWY3MzQ4ZDI4MzhlZjkxMjYxNzM5YTFmMmNkMzE1ZDM1YjRkYTVhNzY1NWNlIn19LCJzaWduYXR1cmUiOnsiY29udGVudCI6Ik1FWUNJUURZWGxQL3A4NEd0Mk40amN6aFV4NTIrQlcrRzFFVVBMdWFndUxROEMzR1lBSWhBTytuU0lJK2dONktHVkVJMFlyb21vZDFWbDJDMndSWk5oSXROS2pRUHdDOSIsInB1YmxpY0tleSI6eyJjb250ZW50IjoiTFMwdExTMUNSVWRKVGlCRFJWSlVTVVpKUTBGVVJTMHRMUzB0Q2sxSlNVTTJSRU5EUVcwclowRjNTVUpCWjBsVldDOVBaMHBQV0VNMmIybEtRVXczU0ZkcVJrUjZjV0pTTm5SWmQwTm5XVWxMYjFwSmVtb3dSVUYzVFhjS1RucEZWazFDVFVkQk1WVkZRMmhOVFdNeWJHNWpNMUoyWTIxVmRWcEhWakpOVWpSM1NFRlpSRlpSVVVSRmVGWjZZVmRrZW1SSE9YbGFVekZ3WW01U2JBcGpiVEZzV2tkc2FHUkhWWGRJYUdOT1RXcE5kMDVFUVRSTmFrbDZUV3BKTlZkb1kwNU5hazEzVGtSQk5FMXFTVEJOYWtrMVYycEJRVTFHYTNkRmQxbElDa3R2V2tsNmFqQkRRVkZaU1V0dldrbDZhakJFUVZGalJGRm5RVVZNVlZsMFZHZG5RMU4yTTNKR0syUnlXVFV2TmtwcVptb3hVWEp4WWxGWE4xZ3haMUVLU1RGU1MwY3ZPV2hzVm1VMk5HZGxTa3hOUW5ocVRVOXhOM3BrZGtWdmIyVmlSRlJ5TlhKVE5UQlpRelJyYm5sRVMwdFBRMEZaTkhkblowZExUVUUwUndwQk1WVmtSSGRGUWk5M1VVVkJkMGxJWjBSQlZFSm5UbFpJVTFWRlJFUkJTMEpuWjNKQ1owVkdRbEZqUkVGNlFXUkNaMDVXU0ZFMFJVWm5VVlV4YTBwdkNsVkhZMHBRZGs1bWVtcERVVlZ0TkdWd1ZrWlRUR2xGZDBoM1dVUldVakJxUWtKbmQwWnZRVlV6T1ZCd2VqRlphMFZhWWpWeFRtcHdTMFpYYVhocE5Ga0tXa1E0ZDFCM1dVUldVakJTUVZGSUwwSkVWWGROTkVWNFdUSTVlbUZYWkhWUlIwNTJZekpzYm1KcE1UQmFXRTR3VEZSTk5FMTZSWGxOYVRWd1dWY3dkUXBhTTA1c1kyNWFjRmt5Vm1oWk1rNTJaRmMxTUV4dFRuWmlWRUZ3UW1kdmNrSm5SVVZCV1U4dlRVRkZRa0pDZEc5a1NGSjNZM3B2ZGt3eVJtcFpNamt4Q21KdVVucE1iV1IyWWpKa2MxcFROV3BpTWpCM1MzZFpTMHQzV1VKQ1FVZEVkbnBCUWtOQlVXUkVRblJ2WkVoU2QyTjZiM1pNTWtacVdUSTVNV0p1VW5vS1RHMWtkbUl5WkhOYVV6VnFZakl3ZDJkWmEwZERhWE5IUVZGUlFqRnVhME5DUVVsRlpYZFNOVUZJWTBGa1VVUmtVRlJDY1hoelkxSk5iVTFhU0doNVdncGFlbU5EYjJ0d1pYVk9ORGh5Wml0SWFXNUxRVXg1Ym5WcVowRkJRVmxrYVM4clVUbEJRVUZGUVhkQ1IwMUZVVU5KUTFKVWNqRklkMjVtYkZVcmJpOVdDbUpVYzB4bWFqQnBNbWhYYTJWS1prWXJjMUZ3V1c5RGJXTk1WVE5CYVVKR1RuUTVhazQ0ZW10alEwTnVUVmhMVGpSTlIxWmtTMEUwZVZsNFFVTlliM01LTWpFd1NtaDFjVTFLZWtGTFFtZG5jV2hyYWs5UVVWRkVRWGRPYmtGRVFtdEJha0kyV21OTVJVOXJiWHBYZUdkMk5WaEpVVzVhV25OV1JrMUVjWGRsTUFwT2FYazBNa00xY2pKMVFXZHZjRUZ0TVZFdlFrNXdUbkpxZEZGRFdtRm1kMVZNWTBOTlJTdHVjVEJ5ZDNkSWEzVnNSRU4zU2tGRFYxcFlWVWs0VHpVdkNsbHROa0ZqY1d3d2JXVkZhRFF3T1dWUksxWkpXbnB5WkRkTmNraGhjbWQwV2tsYU1EVjNQVDBLTFMwdExTMUZUa1FnUTBWU1ZFbEdTVU5CVkVVdExTMHRMUW89In19fX0=\",\"integratedTime\":1680993151,\"logIndex\":17475493,\"logID\":\"c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d\"}}",
+        "dev.sigstore.cosign/certificate": "-----BEGIN CERTIFICATE-----\nMIIC6DCCAm+gAwIBAgIUX/OgJOXC6oiJAL7HWjFDzqbR6tYwCgYIKoZIzj0EAwMw\nNzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl\ncm1lZGlhdGUwHhcNMjMwNDA4MjIzMjI5WhcNMjMwNDA4MjI0MjI5WjAAMFkwEwYH\nKoZIzj0CAQYIKoZIzj0DAQcDQgAELUYtTggCSv3rF+drY5/6Jjfj1QrqbQW7X1gQ\nI1RKG/9hlVe64geJLMBxjMOq7zdvEooebDTr5rS50YC4knyDKKOCAY4wggGKMA4G\nA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQU1kJo\nUGcJPvNfzjCQUm4epVFSLiEwHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y\nZD8wPwYDVR0RAQH/BDUwM4ExY29zaWduQGNvc2lnbi10ZXN0LTM4MzEyMi5pYW0u\nZ3NlcnZpY2VhY2NvdW50LmNvbTApBgorBgEEAYO/MAEBBBtodHRwczovL2FjY291\nbnRzLmdvb2dsZS5jb20wKwYKKwYBBAGDvzABCAQdDBtodHRwczovL2FjY291bnRz\nLmdvb2dsZS5jb20wgYkGCisGAQQB1nkCBAIEewR5AHcAdQDdPTBqxscRMmMZHhyZ\nZzcCokpeuN48rf+HinKALynujgAAAYdi/+Q9AAAEAwBGMEQCICRTr1HwnflU+n/V\nbTsLfj0i2hWkeJfF+sQpYoCmcLU3AiBFNt9jN8zkcCCnMXKN4MGVdKA4yYxACXos\n210JhuqMJzAKBggqhkjOPQQDAwNnADBkAjB6ZcLEOkmzWxgv5XIQnZZsVFMDqwe0\nNiy42C5r2uAgopAm1Q/BNpNrjtQCZafwULcCME+nq0rwwHkulDCwJACWZXUI8O5/\nYm6Acql0meEh409eQ+VIZzrd7MrHargtZIZ05w==\n-----END CERTIFICATE-----\n",
         "dev.sigstore.cosign/chain": "-----BEGIN CERTIFICATE-----\nMIICGjCCAaGgAwIBAgIUALnViVfnU0brJasmRkHrn/UnfaQwCgYIKoZIzj0EAwMw\nKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0y\nMjA0MTMyMDA2MTVaFw0zMTEwMDUxMzU2NThaMDcxFTATBgNVBAoTDHNpZ3N0b3Jl\nLmRldjEeMBwGA1UEAxMVc2lnc3RvcmUtaW50ZXJtZWRpYXRlMHYwEAYHKoZIzj0C\nAQYFK4EEACIDYgAE8RVS/ysH+NOvuDZyPIZtilgUF9NlarYpAd9HP1vBBH1U5CV7\n7LSS7s0ZiH4nE7Hv7ptS6LvvR/STk798LVgMzLlJ4HeIfF3tHSaexLcYpSASr1kS\n0N/RgBJz/9jWCiXno3sweTAOBgNVHQ8BAf8EBAMCAQYwEwYDVR0lBAwwCgYIKwYB\nBQUHAwMwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU39Ppz1YkEZb5qNjp\nKFWixi4YZD8wHwYDVR0jBBgwFoAUWMAeX5FFpWapesyQoZMi0CrFxfowCgYIKoZI\nzj0EAwMDZwAwZAIwPCsQK4DYiZYDPIaDi5HFKnfxXx6ASSVmERfsynYBiX2X6SJR\nnZU84/9DZdnFvvxmAjBOt6QpBlc4J/0DxvkTCqpclvziL6BCCPnjdlIB3Pu3BxsP\nmygUY7Ii2zbdCdliiow=\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nMIIB9zCCAXygAwIBAgIUALZNAPFdxHPwjeDloDwyYChAO/4wCgYIKoZIzj0EAwMw\nKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTAeFw0y\nMTEwMDcxMzU2NTlaFw0zMTEwMDUxMzU2NThaMCoxFTATBgNVBAoTDHNpZ3N0b3Jl\nLmRldjERMA8GA1UEAxMIc2lnc3RvcmUwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAT7\nXeFT4rb3PQGwS4IajtLk3/OlnpgangaBclYpsYBr5i+4ynB07ceb3LP0OIOZdxex\nX69c5iVuyJRQ+Hz05yi+UF3uBWAlHpiS5sh0+H2GHE7SXrk1EC5m1Tr19L9gg92j\nYzBhMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRY\nwB5fkUWlZql6zJChkyLQKsXF+jAfBgNVHSMEGDAWgBRYwB5fkUWlZql6zJChkyLQ\nKsXF+jAKBggqhkjOPQQDAwNpADBmAjEAj1nHeXZp+13NWBNa+EDsDP8G1WWg1tCM\nWP/WHPqpaVo0jhsweNFZgSs0eE7wYI4qAjEA2WB9ot98sIkoF3vZYdd3/VtWB5b9\nTNMea7Ix/stJ5TfcLLeABLE4BNJOsQ4vnBHJ\n-----END CERTIFICATE-----"
       }
     }
@@ -771,26 +809,26 @@ For the KMS based signature:
 
 ```text
 #  cosign attest --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 --predicate predicate.json \
-#     us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
+#     us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
 
 cosign verify-attestation \
   --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 \
     --policy policy.rego    \
-      us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
+      us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
 
 will be validating against Rego policies: [policy.rego]
 
-Verification for us-central1-docker.pkg.dev/cosign-test-365209/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 --
+Verification for us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key
 {
   "payloadType": "application/vnd.in-toto+json",
-  "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjAuMSIsInByZWRpY2F0ZVR5cGUiOiJjb3NpZ24uc2lnc3RvcmUuZGV2L2F0dGVzdGF0aW9uL3YxIiwic3ViamVjdCI6W3sibmFtZSI6InVzLWNlbnRyYWwxLWRvY2tlci5wa2cuZGV2L2Nvc2lnbi10ZXN0LTM2NTIwOS9yZXBvMS9teWltYWdlIiwiZGlnZXN0Ijp7InNoYTI1NiI6IjgzYWIyYmE2Njg5NzEzZjJkNjgxMDRjZDIwOGZlYWRmZWJkZDZiYzg4MWM0NTVkY2I1NWQyYjQ1YWMzYTA3NTMifX1dLCJwcmVkaWNhdGUiOnsiRGF0YSI6InsgXCJwcm9qZWN0aWRcIjogXCJjb3NpZ24tdGVzdC0zNjUyMDlcIiwgXCJidWlsZGlkXCI6IFwiMDU5NGYyZTUtZjYwMC00OGRiLThhYTItZGFmNThlZTFhY2I1XCIsIFwiZm9vXCI6XCJiYXJcIiwgXCJjb21taXRzaGFcIjogXCJkZDkzZTllODkzZmZhZjJjNGNhZmViMmU1MzRiZjAzZjY2ZDdiZjI4XCIgfSIsIlRpbWVzdGFtcCI6IjIwMjItMTAtMTFUMDk6NTI6MjVaIn19",
+  "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjAuMSIsInByZWRpY2F0ZVR5cGUiOiJjb3NpZ24uc2lnc3RvcmUuZGV2L2F0dGVzdGF0aW9uL3YxIiwic3ViamVjdCI6W3sibmFtZSI6InVzLWNlbnRyYWwxLWRvY2tlci5wa2cuZGV2L2Nvc2lnbi10ZXN0LTM4MzEyMi9yZXBvMS9zZWN1cmVidWlsZCIsImRpZ2VzdCI6eyJzaGEyNTYiOiI4M2FiMmJhNjY4OTcxM2YyZDY4MTA0Y2QyMDhmZWFkZmViZGQ2YmM4ODFjNDU1ZGNiNTVkMmI0NWFjM2EwNzUzIn19XSwicHJlZGljYXRlIjp7IkRhdGEiOiJ7IFwicHJvamVjdGlkXCI6IFwiY29zaWduLXRlc3QtMzgzMTIyXCIsIFwiYnVpbGRpZFwiOiBcIjBhNzc0MzYwLWQ1N2UtNDFhZi1hZjhiLTc2ZGQ0MTA5YzQ3Y1wiLCBcImZvb1wiOlwiYmFyXCIsIFwiY29tbWl0c2hhXCI6IFwiNTJkYzhjMTk3OWQ3ZTZiNTZhNWEyNTNkYmQ3OTAyODg0Mjc1MmIwOFwiIH0iLCJUaW1lc3RhbXAiOiIyMDIzLTA0LTA4VDIyOjMyOjI2WiJ9fQ==",
   "signatures": [
     {
       "keyid": "",
-      "sig": "MEUCIQDf4McOgck0jznjOKlzQGeX1Tayfmup0EC7wvkPhPEaEwIgSQCIl/6t2VAYRpvddDJru5CfIxVl5ArKmvxStQwVKDI="
+      "sig": "MEQCIBQsk8yCpb+MoM5Jq8Mx7a+QsFUJNmW0CLboJjvU7HkmAiBug+e7gpYL/NzoguzhZrYJ3mQ3RnhE6U2LziK5SuQlIA=="
     }
   ]
 }
@@ -804,47 +842,48 @@ the decoded payload is
   "predicateType": "cosign.sigstore.dev/attestation/v1",
   "subject": [
     {
-      "name": "us-central1-docker.pkg.dev/cosign-test-365209/repo1/myimage",
+      "name": "us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild",
       "digest": {
-        "sha256": "83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753"
+        "sha256": "5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52"
       }
     }
   ],
   "predicate": {
     "Data": "{ 
-      \"projectid\": \"cosign-test-365209\", 
-      \"buildid\": \"0594f2e5-f600-48db-8aa2-daf58ee1acb5\", 
+      \"projectid\": \"cosign-test-383122\", 
+      \"buildid\": \"0a774360-d57e-41af-af8b-76dd4109c47c\", 
       \"foo\":\"bar\", 
-      \"commitsha\": \"dd93e9e893ffaf2c4cafeb2e534bf03f66d7bf28\" }",
-    "Timestamp": "2022-10-11T09:52:25Z"
+      \"commitsha\": \"52dc8c1979d7e6b56a5a253dbd79028842752b08\" 
+    }",
+    "Timestamp": "2023-04-08T22:32:26Z"
   }
 }
 ```
 
-Note the commit hash (`dd93e9e893ffaf2c4cafeb2e534bf03f66d7bf28`).  you can define a rego to validate that too
+Note the commit hash (`52dc8c1979d7e6b56a5a253dbd79028842752b08`).  you can define a rego to validate that too
 
 for the OIDC based signature,
 
 
 ```bash
 COSIGN_EXPERIMENTAL=1 cosign verify-attestation  --policy policy.rego    \
-        us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
+        us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
 
 
-Verification for us-central1-docker.pkg.dev/cosign-test-365209/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753 --
+Verification for us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - Existence of the claims in the transparency log was verified offline
   - Any certificates were verified against the Fulcio roots.
-Certificate subject:  cosign@cosign-test-365209.iam.gserviceaccount.com
+Certificate subject:  cosign@cosign-test-383122.iam.gserviceaccount.com
 Certificate issuer URL:  https://accounts.google.com
 {
   "payloadType": "application/vnd.in-toto+json",
-  "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjAuMSIsInByZWRpY2F0ZVR5cGUiOiJjb3NpZ24uc2lnc3RvcmUuZGV2L2F0dGVzdGF0aW9uL3YxIiwic3ViamVjdCI6W3sibmFtZSI6InVzLWNlbnRyYWwxLWRvY2tlci5wa2cuZGV2L2Nvc2lnbi10ZXN0LTM2NTIwOS9yZXBvMS9teWltYWdlIiwiZGlnZXN0Ijp7InNoYTI1NiI6IjgzYWIyYmE2Njg5NzEzZjJkNjgxMDRjZDIwOGZlYWRmZWJkZDZiYzg4MWM0NTVkY2I1NWQyYjQ1YWMzYTA3NTMifX1dLCJwcmVkaWNhdGUiOnsiRGF0YSI6InsgXCJwcm9qZWN0aWRcIjogXCJjb3NpZ24tdGVzdC0zNjUyMDlcIiwgXCJidWlsZGlkXCI6IFwiMDU5NGYyZTUtZjYwMC00OGRiLThhYTItZGFmNThlZTFhY2I1XCIsIFwiZm9vXCI6XCJiYXJcIiwgXCJjb21taXRzaGFcIjogXCJkZDkzZTllODkzZmZhZjJjNGNhZmViMmU1MzRiZjAzZjY2ZDdiZjI4XCIgfSIsIlRpbWVzdGFtcCI6IjIwMjItMTAtMTFUMDk6NTI6MzBaIn19",
+  "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjAuMSIsInByZWRpY2F0ZVR5cGUiOiJjb3NpZ24uc2lnc3RvcmUuZGV2L2F0dGVzdGF0aW9uL3YxIiwic3ViamVjdCI6W3sibmFtZSI6InVzLWNlbnRyYWwxLWRvY2tlci5wa2cuZGV2L2Nvc2lnbi10ZXN0LTM4MzEyMi9yZXBvMS9zZWN1cmVidWlsZCIsImRpZ2VzdCI6eyJzaGEyNTYiOiI4M2FiMmJhNjY4OTcxM2YyZDY4MTA0Y2QyMDhmZWFkZmViZGQ2YmM4ODFjNDU1ZGNiNTVkMmI0NWFjM2EwNzUzIn19XSwicHJlZGljYXRlIjp7IkRhdGEiOiJ7IFwicHJvamVjdGlkXCI6IFwiY29zaWduLXRlc3QtMzgzMTIyXCIsIFwiYnVpbGRpZFwiOiBcIjBhNzc0MzYwLWQ1N2UtNDFhZi1hZjhiLTc2ZGQ0MTA5YzQ3Y1wiLCBcImZvb1wiOlwiYmFyXCIsIFwiY29tbWl0c2hhXCI6IFwiNTJkYzhjMTk3OWQ3ZTZiNTZhNWEyNTNkYmQ3OTAyODg0Mjc1MmIwOFwiIH0iLCJUaW1lc3RhbXAiOiIyMDIzLTA0LTA4VDIyOjMyOjM0WiJ9fQ==",
   "signatures": [
     {
       "keyid": "",
-      "sig": "MEYCIQDq3AWKVyXhMohD9V+ihEbJdK/9tS1d01M3ioRigAzT0wIhALvrmg6j7zA9Omq+kBkAyFLc2C2ENTr7pNhB3Pdb8v3h"
+      "sig": "MEUCIQCVzyk9aAXRY0rlk+D7ad8MN0pGBeXQqmGJd+xl9QRMDAIgC0DoUPsUVK2IrErtiH4XWJktJC1WxypnMA78ByvjDoY="
     }
   ]
 }
@@ -857,20 +896,20 @@ I've also uploaded this sample to dockerhub so you can verify without container 
 ```bash
 cosign sign --annotations=key1=value1 \
   --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 \
-      docker.io/salrashid123/myimage:server
+      docker.io/salrashid123/securebuild:server
 
 cosign verify --key cert/kms_pub.pem   \
-    docker.io/salrashid123/myimage:server@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
+    docker.io/salrashid123/securebuild:server@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
 
 
 COSIGN_EXPERIMENTAL=1 cosign attest \
   --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 \
   -f \
-  --predicate=predicate.json  docker.io/salrashid123/myimage:server
+  --predicate=predicate.json  docker.io/salrashid123/securebuild:server
 
 
 COSIGN_EXPERIMENTAL=1 cosign verify-attestation  --key cert/kms_pub.pem --policy policy.rego    \
-       docker.io/salrashid123/myimage:server@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753  | jq '.'
+       docker.io/salrashid123/securebuild:server@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
 ```
 
 ### Cosign and Rekor APIs
@@ -884,11 +923,94 @@ By default, it will scan the dockerhub registry but you can alter it to use your
 
 
 ```bash
-$ go run main.go 
+cd client/
+go run main.go 
 
 >>>>>>>>>> Search rekor <<<<<<<<<<
+LogIndex 17477093
+ UUID c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
+ Entry API Version 0.0.1
+ Kind: intoto
+ PublicKey:
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEPFwNMvKlujD9GHUG2jN6hSZJjatd
+RieR83oRE901m/Bc6iNM5QfaaKC5roUPf7LL7DggnTdJ1aLnJZw5qViAzA==
+-----END PUBLIC KEY-----
+ rekor logentry inclustion verified
+LogIndex 17475497
+ UUID c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
+ Entry API Version 0.0.1
+ Kind: intoto
+ PublicKey:
+-----BEGIN CERTIFICATE-----
+MIIC6TCCAnCgAwIBAgIUKFeyy8/cGb0fPsy3UOX4gK1d1YgwCgYIKoZIzj0EAwMw
+NzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl
+cm1lZGlhdGUwHhcNMjMwNDA4MjIzMjM0WhcNMjMwNDA4MjI0MjM0WjAAMFkwEwYH
+KoZIzj0CAQYIKoZIzj0DAQcDQgAEewrPTefh0V011mk7wfDv5bClQ13irAu1cjP3
+foGWKWqUy6CzN25NMoE73HZLibH+F5KKnWlEaXZoSwdyBYMt9aOCAY8wggGLMA4G
+A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQU2Gic
+3T1X1AvniYTUoSdrf9RN0bAwHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y
+ZD8wPwYDVR0RAQH/BDUwM4ExY29zaWduQGNvc2lnbi10ZXN0LTM4MzEyMi5pYW0u
+Z3NlcnZpY2VhY2NvdW50LmNvbTApBgorBgEEAYO/MAEBBBtodHRwczovL2FjY291
+bnRzLmdvb2dsZS5jb20wKwYKKwYBBAGDvzABCAQdDBtodHRwczovL2FjY291bnRz
+Lmdvb2dsZS5jb20wgYoGCisGAQQB1nkCBAIEfAR6AHgAdgDdPTBqxscRMmMZHhyZ
+ZzcCokpeuN48rf+HinKALynujgAAAYdi//VAAAAEAwBHMEUCIFGJEFbZikCDOqh0
+W8xriW0U/Z5VoLv+fIdXy2i0tZfBAiEA3cQ2yBG23T23W1ZE+03bSGnxRaSqWFl+
+PGAVyDKQpxEwCgYIKoZIzj0EAwMDZwAwZAIwa2Cefp0fSXJ7NMx7LRKDyaFYDIfW
+5jdTisk6fErBKKD6siuNPwCJ5IfJySFNmuoZAjAzBWOsaQljvWCr+IxKLF0OTdKm
+hAIwKqQBDAs+fwT93lvUAW33hSP+4tNy0/9eBJI=
+-----END CERTIFICATE----
+ rekor logentry inclustion verified
+LogIndex 17474990
+ UUID c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
+ Entry API Version 0.0.1
+ Kind: intoto
+ PublicKey:
+-----BEGIN CERTIFICATE-----
+MIIC6zCCAnGgAwIBAgIUOcYlHoxtkY8yWq0H666BLcJ50+MwCgYIKoZIzj0EAwMw
+NzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl
+cm1lZGlhdGUwHhcNMjMwNDA4MjIyMDQxWhcNMjMwNDA4MjIzMDQxWjAAMFkwEwYH
+KoZIzj0CAQYIKoZIzj0DAQcDQgAEIIoO7NyVM5x/yOzIZuMt2ucAh8nnhrt3OtQs
+iDp03nY2Wh+wrAjaepMqeMxAtqtnluEa+1nOFFNjESd5WcsG36OCAZAwggGMMA4G
+A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQUU/ZJ
+1BsK9RDRWKDxKAfIzWgk07EwHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y
+ZD8wQAYDVR0RAQH/BDYwNIEyY29zaWduQG1pbmVyYWwtbWludXRpYS04MjAuaWFt
+LmdzZXJ2aWNlYWNjb3VudC5jb20wKQYKKwYBBAGDvzABAQQbaHR0cHM6Ly9hY2Nv
+dW50cy5nb29nbGUuY29tMCsGCisGAQQBg78wAQgEHQwbaHR0cHM6Ly9hY2NvdW50
+cy5nb29nbGUuY29tMIGKBgorBgEEAdZ5AgQCBHwEegB4AHYA3T0wasbHETJjGR4c
+mWc3AqJKXrjePK3/h4pygC8p7o4AAAGHYvUUNAAABAMARzBFAiBODxOKyjHWSmeU
+rxHorSrRN/CL5Krae+eoy4NFFe1mcAIhAL71HXWFI4I7HU+RuxnbC8NNUyco6SX7
+nfvMPxt9IIdoMAoGCCqGSM49BAMDA2gAMGUCMQDpC7ME7+R+Zas9fH+F6Egi0yN5
+C82RTIWHSIQSBx/cyqheDfJzFPUY6N+N8raM4i4CMHWNA/egoeaFCFUA9qcOuTXc
+nLPaKtm2nIG8ah55fERrf/4muJqXxqfZ/B2nF6WLmA==
+-----END CERTIFICATE-----
 
-## KMS
+ rekor logentry inclustion verified
+LogIndex 17204909
+ UUID c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
+ Entry API Version 0.0.1
+ Kind: intoto
+ PublicKey:
+-----BEGIN CERTIFICATE-----
+MIIC7DCCAnGgAwIBAgIUPjIAKRyOCFfDKtitS+W13np1oR0wCgYIKoZIzj0EAwMw
+NzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl
+cm1lZGlhdGUwHhcNMjMwNDA1MTkwNzE3WhcNMjMwNDA1MTkxNzE3WjAAMFkwEwYH
+KoZIzj0CAQYIKoZIzj0DAQcDQgAE21t2Bxpm/DnAtrW9mwM6FpXWLdT8Y++HhSHP
+FoXZX34x0Zll7UjZ1rbYGxsxDksNh3T49axrP/hSkxk7CwWV06OCAZAwggGMMA4G
+A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQUl/4/
+awtloWkDKB8oLYj8V9b5KJ4wHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y
+ZD8wQAYDVR0RAQH/BDYwNIEyY29zaWduQG1pbmVyYWwtbWludXRpYS04MjAuaWFt
+LmdzZXJ2aWNlYWNjb3VudC5jb20wKQYKKwYBBAGDvzABAQQbaHR0cHM6Ly9hY2Nv
+dW50cy5nb29nbGUuY29tMCsGCisGAQQBg78wAQgEHQwbaHR0cHM6Ly9hY2NvdW50
+cy5nb29nbGUuY29tMIGKBgorBgEEAdZ5AgQCBHwEegB4AHYA3T0wasbHETJjGR4c
+mWc3AqJKXrjePK3/h4pygC8p7o4AAAGHUtDxogAABAMARzBFAiAy49G754A3ZMOm
+fydikVN5k9ycBCMg0EoXH1LBaWeBswIhAKrOWlQZLktQTfnjAOBi6BAae6snCBMq
+M3wYjB3PAz9lMAoGCCqGSM49BAMDA2kAMGYCMQDk34fHpWKN1PhkGCXzVaDi950Q
+FatRjfnuyOcfaZvOeSWVkIFdetmZ8WC59mOVyNwCMQDNPsLXTi0/JonZAj0xYzBQ
+vWBbfAHhOB4gUIs7qafmuItVdlAj9MzmefFXwyc4nyY=
+-----END CERTIFICATE-----
+
+ rekor logentry inclustion verified
 LogIndex 4886588
  UUID c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
  Entry API Version 0.0.1
@@ -899,34 +1021,6 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEjNbDUDgtOGPkkBYbY+m8O95e+WQJ
 NuFKm46ooRBeRw/92iTzPmHmY4/fF+XeiMIEmlNim0WkhHfxpWFSL48sog==
 -----END PUBLIC KEY-----
  rekor logentry inclustion verified
-
-
-## email:cosign@cosign-test-363613.iam.gserviceaccount.com
-LogIndex 3942848
- UUID c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
- Entry API Version 0.0.1
- Kind: intoto
- PublicKey:
------BEGIN CERTIFICATE-----
-MIICvDCCAkOgAwIBAgIUCRasP2dIpyOLnsxBZg+JrgtdVQcwCgYIKoZIzj0EAwMw
-NzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl
-cm1lZGlhdGUwHhcNMjIwOTI1MTMxNjM3WhcNMjIwOTI1MTMyNjM3WjAAMFkwEwYH
-KoZIzj0CAQYIKoZIzj0DAQcDQgAErNXX7JaOVfyxuDAlOul44zjlBODELx+CF64B
-vp5/LXMS9NDU5eGlfDhw1dmtuHeS/HUyILFWSe/dUBv7FAcNdqOCAWIwggFeMA4G
-A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQUbxul
-eomPawZobo7gdrFGAWaajJ0wHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y
-ZD8wPwYDVR0RAQH/BDUwM4ExY29zaWduQGNvc2lnbi10ZXN0LTM2MzYxMy5pYW0u
-Z3NlcnZpY2VhY2NvdW50LmNvbTApBgorBgEEAYO/MAEBBBtodHRwczovL2FjY291
-bnRzLmdvb2dsZS5jb20wgYoGCisGAQQB1nkCBAIEfAR6AHgAdgAIYJLwKFL/aEXR
-0WsnhJxFZxisFj3DONJt5rwiBjZvcgAAAYN0yuYwAAAEAwBHMEUCIQDPI8xna678
-YQh1zFyv0QbG298F04cBdFRpO7B1E5LupQIgAdalXGD2l5LlY3TDQx8epodOT4Hk
-It8Iv/Cjm6RzYWEwCgYIKoZIzj0EAwMDZwAwZAIwJ5Ruij7ukyMlBdDvM7tEAX81
-NjbUGPuc2+3U/38fYOgTV3UmuWgsERCIYndFjJtWAjBXA9Ilo0+odoMH/zGRC6Pp
-kf4ghWWMEyXndi2W/zXeuCKZqc5fpEyxD7oqNnyM+7A=
------END CERTIFICATE-----
- rekor logentry inclustion verified
-
-## email:cosign@cosign-test-365209.iam.gserviceaccount.com
 LogIndex 4884684
  UUID c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
  Entry API Version 0.0.1
@@ -950,8 +1044,6 @@ MCCzqc+Qkd1i2DxeT6Nob6oqo9izwOUEpODgkPrd0gIwbnyLmdDetq7jSrK94ep4
 0no7Bcns7404NXcvXZMGQi64pmTHUmc0uQIxr00VSGVf
 -----END CERTIFICATE-----
  rekor logentry inclustion verified
-
-##  email:cosign@cosign-test-363615.iam.gserviceaccount.com
 LogIndex 3944855
  UUID c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
  Entry API Version 0.0.1
@@ -974,11 +1066,33 @@ gZSS45I/D8Aw+kQwCgYIKoZIzj0EAwMDaAAwZQIxALFjPTLIY5sQAeMAf0MSF51P
 1YUWXA8tQAAJEaBAyrJKiwzFxz+sWDLNc6oE6+/OxQIwdn0R8z9CFyOzdVNpEY94
 dDqYllqNlcSL52TafK0aaTgigptedOftbttvaF99wnur
 -----END CERTIFICATE-----
-
  rekor logentry inclustion verified
->>>>>>>>>> Verifying Image Signatures <<<<<<<<<<
-Verified signature MEQCIGWaJFKrT1bS8FtK1avr8lUxCCK2f7DqMNFK0+SZrQSJAiB+hfhY73b99JFmM3H6kJaPSHVnEg50GCXskAzFHWX7nA==
-  Image Ref {sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753}
+LogIndex 3942848
+ UUID c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d
+ Entry API Version 0.0.1
+ Kind: intoto
+ PublicKey:
+-----BEGIN CERTIFICATE-----
+MIICvDCCAkOgAwIBAgIUCRasP2dIpyOLnsxBZg+JrgtdVQcwCgYIKoZIzj0EAwMw
+NzEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MR4wHAYDVQQDExVzaWdzdG9yZS1pbnRl
+cm1lZGlhdGUwHhcNMjIwOTI1MTMxNjM3WhcNMjIwOTI1MTMyNjM3WjAAMFkwEwYH
+KoZIzj0CAQYIKoZIzj0DAQcDQgAErNXX7JaOVfyxuDAlOul44zjlBODELx+CF64B
+vp5/LXMS9NDU5eGlfDhw1dmtuHeS/HUyILFWSe/dUBv7FAcNdqOCAWIwggFeMA4G
+A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzAdBgNVHQ4EFgQUbxul
+eomPawZobo7gdrFGAWaajJ0wHwYDVR0jBBgwFoAU39Ppz1YkEZb5qNjpKFWixi4Y
+ZD8wPwYDVR0RAQH/BDUwM4ExY29zaWduQGNvc2lnbi10ZXN0LTM2MzYxMy5pYW0u
+Z3NlcnZpY2VhY2NvdW50LmNvbTApBgorBgEEAYO/MAEBBBtodHRwczovL2FjY291
+bnRzLmdvb2dsZS5jb20wgYoGCisGAQQB1nkCBAIEfAR6AHgAdgAIYJLwKFL/aEXR
+0WsnhJxFZxisFj3DONJt5rwiBjZvcgAAAYN0yuYwAAAEAwBHMEUCIQDPI8xna678
+YQh1zFyv0QbG298F04cBdFRpO7B1E5LupQIgAdalXGD2l5LlY3TDQx8epodOT4Hk
+It8Iv/Cjm6RzYWEwCgYIKoZIzj0EAwMDZwAwZAIwJ5Ruij7ukyMlBdDvM7tEAX81
+NjbUGPuc2+3U/38fYOgTV3UmuWgsERCIYndFjJtWAjBXA9Ilo0+odoMH/zGRC6Pp
+kf4ghWWMEyXndi2W/zXeuCKZqc5fpEyxD7oqNnyM+7A=
+-----END CERTIFICATE-----
+ rekor logentry inclustion verified
+>>>>>>>>>> Verifying Image Signatures using provided PublicKey <<<<<<<<<<
+Verified signature MEQCIC/pp/wJIV3gmOhxdLMi8UcIwC47U8WFVicMcntF2ZtQAiAl6kYqifpQFqPEFsUTl5cTf+hFuuLlGzeWosBnLwwZeA==
+  Image Ref {sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52}
 
 ```
 
@@ -989,8 +1103,8 @@ Verified signature MEQCIGWaJFKrT1bS8FtK1avr8lUxCCK2f7DqMNFK0+SZrQSJAiB+hfhY73b99
 The following will sign an image with a key and verify with the signatuere provided inline (`--signature`)
 
 ```bash
-export IMAGE=docker.io/salrashid123/myimage:server
-export IMAGE_DIGEST=$IMAGE@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
+export IMAGE=docker.io/salrashid123/securebuild:server
+export IMAGE_DIGEST=$IMAGE@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
 
 gcloud kms keys versions get-public-key 1  \
    --key=key1 --keyring=cosignkr  \
@@ -999,11 +1113,11 @@ gcloud kms keys versions get-public-key 1  \
 
 ### sign
 $ cosign sign \
-  --key gcpkms://projects/PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 \
+  --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 \
   --upload=false $IMAGE_DIGEST --no-tlog-upload=true --output-signature sig.txt
 
 $ cat sig.txt 
-MEQCIG44Ca2Ngtvnj0bC7dvsPECgvXJJ88sVaTkOoMBR5HoqAiAXM8uUPWDMISYgv50mUSl7Oe2nFhP54Up/C4grKxVXPw==
+MEQCICyVTj5NY++6JuWpRf2OlzVFwD3C1qfpZDsjia/gBooxAiBw7DMxWXDivBEh3rLifU1jKZstAUPwilbsP3fjut2yAQ==
 
 cosign verify  --key /tmp/kms_pub.pem $IMAGE --signature sig.txt | jq '.'
 
@@ -1021,14 +1135,15 @@ cosign attest \
 cat /tmp/attest.txt  | jq '.'
 {
   "payloadType": "application/vnd.in-toto+json",
-  "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjAuMSIsInByZWRpY2F0ZVR5cGUiOiJjb3NpZ24uc2lnc3RvcmUuZGV2L2F0dGVzdGF0aW9uL3YxIiwic3ViamVjdCI6W3sibmFtZSI6ImluZGV4LmRvY2tlci5pby9zYWxyYXNoaWQxMjMvbXlpbWFnZSIsImRpZ2VzdCI6eyJzaGEyNTYiOiI4M2FiMmJhNjY4OTcxM2YyZDY4MTA0Y2QyMDhmZWFkZmViZGQ2YmM4ODFjNDU1ZGNiNTVkMmI0NWFjM2EwNzUzIn19XSwicHJlZGljYXRlIjp7IkRhdGEiOiJ7IFxuICAgIFwicHJvamVjdGlkXCI6IFwiJFBST0pFQ1RfSURcIiwgXG4gICAgXCJidWlsZGlkXCI6IFwiJEJVSUxEX0lEXCIsIFxuICAgIFwiZm9vXCI6IFwiYmFyXCIsIFxuICAgIFwiY29tbWl0c2hhXCI6IFwiZm9vXCJcbn0iLCJUaW1lc3RhbXAiOiIyMDIyLTEwLTE2VDAxOjQ0OjQxWiJ9fQ==",
+  "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjAuMSIsInByZWRpY2F0ZVR5cGUiOiJjb3NpZ24uc2lnc3RvcmUuZGV2L2F0dGVzdGF0aW9uL3YxIiwic3ViamVjdCI6W3sibmFtZSI6ImluZGV4LmRvY2tlci5pby9zYWxyYXNoaWQxMjMvc2VjdXJlYnVpbGQiLCJkaWdlc3QiOnsic2hhMjU2IjoiODNhYjJiYTY2ODk3MTNmMmQ2ODEwNGNkMjA4ZmVhZGZlYmRkNmJjODgxYzQ1NWRjYjU1ZDJiNDVhYzNhMDc1MyJ9fV0sInByZWRpY2F0ZSI6eyJEYXRhIjoieyBcbiAgICBcInByb2plY3RpZFwiOiBcIiRQUk9KRUNUX0lEXCIsIFxuICAgIFwiYnVpbGRpZFwiOiBcIiRCVUlMRF9JRFwiLCBcbiAgICBcImZvb1wiOiBcImJhclwiLCBcbiAgICBcImNvbW1pdHNoYVwiOiBcImZvb1wiXG59IiwiVGltZXN0YW1wIjoiMjAyMy0wNC0wOFQyMzoxNjo1OFoifX0=",
   "signatures": [
     {
       "keyid": "",
-      "sig": "MEQCIF+BmFeezMELIXiTSVanE6tuyaNz+Zc3hHgw6e9DXXQZAiAuQPZt4BUp4J9PDMUJbLWmB0ghLd7wvBWFqrjMjXfqmQ=="
+      "sig": "MEUCIQCVXHZwaZdYBGsUjVyhn0wBnjv5IWS3QJLiNqbvRoypngIgMUF3wdLJVZ5pZPSQvHEBYBFGFXbIj0+xxlkxzW6zVME="
     }
   ]
 }
+
 ```
 
 ### Sign offline and attach
@@ -1036,8 +1151,8 @@ cat /tmp/attest.txt  | jq '.'
 The following will allow two different signer to create signatures using their own keys and then the repo owner can `attach` the signatures to the registry.  
 
 ```bash
-export IMAGE=us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage:server
-export IMAGE_DIGEST=us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
+export IMAGE=us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server
+export IMAGE_DIGEST=us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
 
 ### Create a signer
 cosign generate-key-pair
@@ -1051,18 +1166,33 @@ cosign sign \
 
 cosign verify  --key c1.pub $IMAGE --signature sig.txt | jq '.'
 
-$ cosign tree us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
-    📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
-    No Supply Chain Security Related Artifacts artifacts found for image us-central1-docker.pkg.dev/PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
+$ cosign tree us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
+  📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
+  └── 💾 Attestations for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.att
+    ├── 🍒 sha256:400b85ee2faf8e939ca92644dab7fcb69680729fcdf18c6d5798823e694bdeb8
+    └── 🍒 sha256:b13908ecec6666c94a7ed985f51dab3dd42f24fa64650f247db270f9d89f2d79
+  └── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sig
+    ├── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
+    └── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
+  └── 📦 SBOMs for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sbom
+    └── 🍒 sha256:65178140d352ed9fd6a5f2e3d1a126497dab116f1ceb8c5fe5685516011e07b5
 
-# attach as repo owner
+  # attach as repo owner
 cosign attach signature --signature `cat sig.txt` $IMAGE_DIGEST
 
 
-$ cosign tree us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
-    📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
-    └── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/PROJECT_ID/repo1/myimage:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sig
-       └── 🍒 sha256:3795bcd1f5c026967d24d1250e20b5ffd76372cc0ac9690a31013cf04d0e5952
+$ cosign tree us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
+  📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
+  └── 💾 Attestations for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.att
+    ├── 🍒 sha256:400b85ee2faf8e939ca92644dab7fcb69680729fcdf18c6d5798823e694bdeb8
+    └── 🍒 sha256:b13908ecec6666c94a7ed985f51dab3dd42f24fa64650f247db270f9d89f2d79
+  └── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sig
+    ├── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
+    ├── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
+    └── 🍒 sha256:15e121a0a6228ef2dc88ec13a865c3963fc238c64dc4e09b48edd80d573dadcb
+  └── 📦 SBOMs for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sbom
+    └── 🍒 sha256:65178140d352ed9fd6a5f2e3d1a126497dab116f1ceb8c5fe5685516011e07b5
+
 
 ### Create a new signer
 
@@ -1075,16 +1205,51 @@ cosign sign \
   --key c2.key \
   --upload=false $IMAGE_DIGEST --no-tlog-upload=true --output-signature sig.txt
 
-cosign verify  --key c1.pub $IMAGE --signature sig.txt | jq '.'
+cosign verify  --key c2.pub $IMAGE --signature sig.txt | jq '.'
 
 # attach as repo owner
 cosign attach signature --signature `cat sig.txt` $IMAGE_DIGEST
 
-$ cosign tree us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
-    📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/PROJECT_ID/repo1/myimage@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
-    └── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/PROJECT_ID/repo1/myimage:sha256-83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753.sig
-       ├── 🍒 sha256:3795bcd1f5c026967d24d1250e20b5ffd76372cc0ac9690a31013cf04d0e5952
-       └── 🍒 sha256:3795bcd1f5c026967d24d1250e20b5ffd76372cc0ac9690a31013cf04d0e5952
+📦 Supply Chain Security Related artifacts for an image: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
+└── 💾 Attestations for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.att
+   ├── 🍒 sha256:400b85ee2faf8e939ca92644dab7fcb69680729fcdf18c6d5798823e694bdeb8
+   └── 🍒 sha256:b13908ecec6666c94a7ed985f51dab3dd42f24fa64650f247db270f9d89f2d79
+└── 🔐 Signatures for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sig
+   ├── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
+   ├── 🍒 sha256:02277181cf8f82a917f1f7348d2838ef91261739a1f2cd315d35b4da5a7655ce
+   ├── 🍒 sha256:15e121a0a6228ef2dc88ec13a865c3963fc238c64dc4e09b48edd80d573dadcb
+   └── 🍒 sha256:15e121a0a6228ef2dc88ec13a865c3963fc238c64dc4e09b48edd80d573dadcb
+└── 📦 SBOMs for an image tag: us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sbom
+   └── 🍒 sha256:65178140d352ed9fd6a5f2e3d1a126497dab116f1ceb8c5fe5685516011e07b5
+
+```
+
+
+### Verify the image `sbom`
+
+```bash
+# cosign verify --key /tmp/kms_pub.pem --attachment=sbom          us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52  | jq '.'
+
+Verification for us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild:sha256-5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52.sbom --
+The following checks were performed on each of these signatures:
+  - The cosign claims were validated
+  - The signatures were verified against the specified public key
+[
+  {
+    "critical": {
+      "identity": {
+        "docker-reference": "us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild"
+      },
+      "image": {
+        "docker-manifest-digest": "sha256:85313f9a6c496176b3ae16c8602b396574f0bb47c43b395afa17865d9437d997"
+      },
+      "type": "cosign container image signature"
+    },
+    "optional": {
+      "commit_sha": "52dc8c1979d7e6b56a5a253dbd79028842752b08"
+    }
+  }
+]
 ```
 
 ---
@@ -1092,5 +1257,3 @@ $ cosign tree us-central1-docker.pkg.dev/$PROJECT_ID/repo1/myimage@sha256:83ab2b
 thats as much as i know about this at the time of writing..
 
 ---
-
-

@@ -1,4 +1,4 @@
-module github.com/salrashid123/examples/go
+module github.com/salrashid123/cosign_bazel_cloud_build/app
 
 go 1.19
 
