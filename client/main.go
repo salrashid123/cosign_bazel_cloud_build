@@ -26,9 +26,9 @@ import (
 )
 
 var (
-	hash = flag.String("hash", "83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753", "Raw image hash value")
-	//imageRef = flag.String("imageRef", "us-central1-docker.pkg.dev/cosign-test-383122/repo1/securebuild@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753", "Image Referenc")
-	imageRef = flag.String("imageRef", "docker.io/salrashid123/securebuild:server@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753", "Image Reference")
+	hash = flag.String("hash", "5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52", "Raw image hash value")
+	//imageRef = flag.String("imageRef", "us-central1-docker.pkg.dev/cosign-test-384419/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52", "Image Referenc")
+	imageRef = flag.String("imageRef", "docker.io/salrashid123/securebuild:server@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52", "Image Reference")
 	kmspub   = flag.String("kmspub", "../cert/kms_pub.pem", "KMS Public Key")
 )
 
@@ -125,7 +125,7 @@ func main() {
 	// *******************
 
 	fmt.Println(">>>>>>>>>> Verifying Image Signatures using provided PublicKey <<<<<<<<<<")
-	// cosign verify --key cert/kms_pub.pem       docker.io/salrashid123/securebuild:server@sha256:83ab2ba6689713f2d68104cd208feadfebdd6bc881c455dcb55d2b45ac3a0753
+	// cosign verify --key cert/kms_pub.pem       docker.io/salrashid123/securebuild:server@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
 	pubKey, err := sigs.LoadPublicKey(ctx, *kmspub)
 	if err != nil {
 		panic(err)

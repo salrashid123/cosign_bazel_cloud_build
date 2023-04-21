@@ -4,14 +4,18 @@ steps:
     id: build
     args: ['run', '--platforms=@io_bazel_rules_go//go/toolchain:linux_amd64', ':server']
 
-  - name: gcr.io/cloud-builders/docker
+  - name: gcr.io/cloud-builders/docker@sha256:885aba69c8f1c69cd0a4d60b195df6fed32519c204cf3ebd6e63db50d6806a7d
     id: tag
     args: ['tag', 'us-central1-docker.pkg.dev/builder-project/repo1/securebuild:server', 'us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server']
     waitFor: ['build']
 
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: gcr.io/cloud-builders/docker@sha256:885aba69c8f1c69cd0a4d60b195df6fed32519c204cf3ebd6e63db50d6806a7d
     id: push
-    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server']
+    entrypoint: '/bin/bash'
+    args:      
+    - '-c'
+    - |
+      /usr/bin/docker push us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server > /tmp/push_output.txt  && tail -1 /tmp/push_output.txt | awk '{printf("us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild@") $3}' >  /workspace/name_hash.txt
     waitFor: ['tag']
 
   - id: attestations
@@ -20,35 +24,25 @@ steps:
     args:
       - -c
       - |
-
-        echo -n '{ "projectid": "$PROJECT_ID", "buildid": "$BUILD_ID", "foo":"bar", "commitsha": "$COMMIT_SHA" }' > /workspace/predicates.json
-
+        echo -n '{ "projectid": "$PROJECT_ID", "buildid": "$BUILD_ID", "foo":"bar", "commitsha": "$COMMIT_SHA", "name_hash": "$(cat /workspace/name_hash.txt)"}' > /workspace/predicates.json
+    waitFor: ['push']
 
   - name: gcr.io/projectsigstore/cosign@sha256:ac8e08a2141e093f4fd7d1d0b05448804eb3771b66574b13ad73e31b460af64d
     id: sign_kms
-    env:
-    - REGISTRY=us-central1-docker.pkg.dev
-    - COSIGN_EXPERIMENTAL=1      
-    args:
-    - sign
-    - --annotations=key1=value1
-    - --key
-    - gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1
-    - us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server
+    entrypoint: 'sh'
+    args:      
+    - '-c'
+    - |
+      cosign sign --annotations=key1=value1 --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 $(cat /workspace/name_hash.txt)
     waitFor: ['push']
 
   - name: gcr.io/projectsigstore/cosign@sha256:ac8e08a2141e093f4fd7d1d0b05448804eb3771b66574b13ad73e31b460af64d
     id: attest_kms
-    env:
-    - REGISTRY=us-central1-docker.pkg.dev
-    - COSIGN_EXPERIMENTAL=1        
-    args:
-    - attest
-    - --key
-    - gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1
-    - --predicate=/workspace/predicates.json
-    - -y
-    - us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server
+    entrypoint: 'sh'
+    args:      
+    - '-c'
+    - |
+      cosign attest --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 --predicate=/workspace/predicates.json -y $(cat /workspace/name_hash.txt)
     waitFor: ['push','sign_kms']
 
   - name: gcr.io/projectsigstore/cosign@sha256:ac8e08a2141e093f4fd7d1d0b05448804eb3771b66574b13ad73e31b460af64d
@@ -58,12 +52,11 @@ steps:
     - TUF_ROOT=/tmp    
     - COSIGN_EXPERIMENTAL=1
     - GOOGLE_SERVICE_ACCOUNT_NAME=cosign@$PROJECT_ID.iam.gserviceaccount.com  
-    args:
-    - sign
-    - --annotations=key1=value1
-    - -f
-    - -y
-    - us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server
+    entrypoint: 'sh'
+    args:      
+    - '-c'
+    - |
+      cosign sign --annotations=key1=value1 -f -y $(cat /workspace/name_hash.txt)
     waitFor: ['attest_kms']
 
   - name: gcr.io/projectsigstore/cosign@sha256:ac8e08a2141e093f4fd7d1d0b05448804eb3771b66574b13ad73e31b460af64d
@@ -73,42 +66,39 @@ steps:
     - TUF_ROOT=/tmp    
     - COSIGN_EXPERIMENTAL=1
     - GOOGLE_SERVICE_ACCOUNT_NAME=cosign@$PROJECT_ID.iam.gserviceaccount.com  
-    args:
-    - attest
-    - -f
-    - --predicate=/workspace/predicates.json
-    - -y
-    - us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server
+    entrypoint: 'sh'
+    args:      
+    - '-c'
+    - |
+      cosign attest -f --predicate=/workspace/predicates.json -y  $(cat /workspace/name_hash.txt)
     waitFor: ['sign_oidc']    
 
-  - name: docker.io/anchore/syft@sha256:0f36bf87fcc63ffdbc64cec6c74d855941351dfeeb38fcc5cef46a2aa8302ceb
+  - name: docker.io/anchore/syft@sha256:7a0f80ba92423d6771da80c4b7d3d051759ed2b3f66a85a9922d448ea6eff60b
     id: generate_sbom
-    args:
-    - packages  
-    - us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server
-    - -o=spdx
-    - --file=/workspace/latest.spdx
+    entrypoint: 'sh'
+    args:      
+    - '-c'
+    - |    
+      /syft packages $(/busybox/cat /workspace/name_hash.txt) -o=spdx --file=/workspace/latest.spdx
     waitFor: ['push']
 
   - name: gcr.io/projectsigstore/cosign@sha256:ac8e08a2141e093f4fd7d1d0b05448804eb3771b66574b13ad73e31b460af64d
     id: attach_sbom
-    args:
-    - attach 
-    - sbom 
-    - --sbom=/workspace/latest.spdx
-    - us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server
+    entrypoint: 'sh'
+    args:      
+    - '-c'
+    - |
+      cosign attach sbom --sbom=/workspace/latest.spdx $(cat /workspace/name_hash.txt)
     waitFor: ['generate_sbom']
 
   - name: gcr.io/projectsigstore/cosign@sha256:ac8e08a2141e093f4fd7d1d0b05448804eb3771b66574b13ad73e31b460af64d
     id: sign_sbom 
-    args:
-    - sign
-    - --annotations=commit_sha=$COMMIT_SHA
-    - --attachment=sbom
-    - --key
-    - gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1
-    - us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild:server
-    waitFor: ['attach_sbom']    
+    entrypoint: 'sh'
+    args:      
+    - '-c'
+    - |
+      cosign sign --annotations=commit_sha=$COMMIT_SHA --attachment=sbom --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 $(cat /workspace/name_hash.txt)
+    waitFor: ['attach_sbom']
 
 serviceAccount: 'projects/$PROJECT_ID/serviceAccounts/cosign@$PROJECT_ID.iam.gserviceaccount.com'
 options:
