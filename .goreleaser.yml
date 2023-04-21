@@ -16,6 +16,7 @@ scoop:
   goamd64: v1
 builds:
   - id: cosign_bazel_cloud_build
+    main: ./app/main.go
     goos:
       - linux
     goarch:
