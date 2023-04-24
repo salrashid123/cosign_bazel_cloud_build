@@ -33,8 +33,8 @@ container_image(
     name = "server",
     base = ":main_image",
     ports = ["8080"],
-    repository = "us-central1-docker.pkg.dev/builder-project/repo1/securebuild"
-    #repository = "docker.io/salrashid123/securebuild"    
+    repository = "us-central1-docker.pkg.dev/builder-project/repo1/securebuild-bazel"
+    #repository = "docker.io/salrashid123/securebuild-bazel"    
 )
 
 go_library(

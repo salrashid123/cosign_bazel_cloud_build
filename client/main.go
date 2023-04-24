@@ -28,8 +28,8 @@ import (
 var (
 	hash = flag.String("hash", "5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52", "Raw image hash value")
 	//imageRef = flag.String("imageRef", "us-central1-docker.pkg.dev/cosign-test-384419/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52", "Image Referenc")
-	imageRef = flag.String("imageRef", "docker.io/salrashid123/securebuild:server@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52", "Image Reference")
-	kmspub   = flag.String("kmspub", "../cert/kms_pub.pem", "KMS Public Key")
+	imageRef = flag.String("imageRef", "docker.io/salrashid123/securebuild-bazel:server@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52", "Image Reference")
+	kmspub   = flag.String("kmspub", "../kms_pub.pem", "KMS Public Key")
 )
 
 const ()
