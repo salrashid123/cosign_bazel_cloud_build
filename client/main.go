@@ -12,6 +12,7 @@ import (
 	//"github.com/google/go-containerregistry/pkg/authn"
 
 	"github.com/go-openapi/runtime"
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	cosign "github.com/sigstore/cosign/pkg/cosign"
@@ -23,12 +24,12 @@ import (
 	"github.com/sigstore/rekor/pkg/generated/models"
 	"github.com/sigstore/rekor/pkg/types"
 	"github.com/sigstore/sigstore/pkg/signature/payload"
+	"golang.org/x/oauth2/google"
 )
 
 var (
-	hash = flag.String("hash", "5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52", "Raw image hash value")
-	//imageRef = flag.String("imageRef", "us-central1-docker.pkg.dev/cosign-test-384419/repo1/securebuild@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52", "Image Referenc")
-	imageRef = flag.String("imageRef", "docker.io/salrashid123/securebuild-bazel:server@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52", "Image Reference")
+	hash     = flag.String("hash", "a2b109fb9baea555556561317fdd13cef9c3dfac22c8f8fea0c5a0b06ece9d00", "Raw image hash value")
+	imageRef = flag.String("imageRef", "us-central1-docker.pkg.dev/YOUR_PROJECT_ID_HERE/repo1/securebuild-bazel@sha256:a2b109fb9baea555556561317fdd13cef9c3dfac22c8f8fea0c5a0b06ece9d00", "Image Referenc")
 	kmspub   = flag.String("kmspub", "../kms_pub.pem", "KMS Public Key")
 )
 
@@ -125,7 +126,6 @@ func main() {
 	// *******************
 
 	fmt.Println(">>>>>>>>>> Verifying Image Signatures using provided PublicKey <<<<<<<<<<")
-	// cosign verify --key cert/kms_pub.pem       docker.io/salrashid123/securebuild:server@sha256:5ce2d8cd8e366d76ce012edc346daeb15a5643c26b9b24a2b731e97a99c6de52
 	pubKey, err := sigs.LoadPublicKey(ctx, *kmspub)
 	if err != nil {
 		panic(err)
@@ -139,19 +139,19 @@ func main() {
 	// for artifact registry
 	// "github.com/google/go-containerregistry/pkg/authn"
 	// "golang.org/x/oauth2/google"
-	// ts, _ := google.DefaultTokenSource(ctx)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// t, err := ts.Token()
-	// if err != nil {
-	// 	panic(err)
-	// }
+	ts, _ := google.DefaultTokenSource(ctx)
+	if err != nil {
+		panic(err)
+	}
+	t, err := ts.Token()
+	if err != nil {
+		panic(err)
+	}
 
 	opts := []remote.Option{
-		// remote.WithAuth(&authn.Bearer{
-		// 	Token: t.AccessToken,
-		// }),
+		remote.WithAuth(&authn.Bearer{
+			Token: t.AccessToken,
+		}),
 		remote.WithContext(ctx),
 	}
 

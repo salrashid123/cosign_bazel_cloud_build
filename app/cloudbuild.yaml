@@ -4,19 +4,31 @@ steps:
     id: build
     args: ['run', '--platforms=@io_bazel_rules_go//go/toolchain:linux_amd64', ':server']
 
-  - name: gcr.io/cloud-builders/docker@sha256:885aba69c8f1c69cd0a4d60b195df6fed32519c204cf3ebd6e63db50d6806a7d
-    id: tag
-    args: ['tag', 'us-central1-docker.pkg.dev/builder-project/repo1/securebuild-bazel:server', 'us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild-bazel:server']
-    waitFor: ['build']
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
+    id: token
+    entrypoint: /bin/bash
+    args:      
+    - '-c'
+    - |
+      gcloud auth print-access-token > /workspace/token
 
-  - name: gcr.io/cloud-builders/docker@sha256:885aba69c8f1c69cd0a4d60b195df6fed32519c204cf3ebd6e63db50d6806a7d
+  - name: quay.io/containers/skopeo@sha256:2f90e4c091a45cf0f92916642a97227531c4242ea18979b16359966ca358ec63
     id: push
     entrypoint: '/bin/bash'
     args:      
     - '-c'
     - |
-      /usr/bin/docker push us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild-bazel:server > /tmp/push_output.txt  && tail -1 /tmp/push_output.txt | awk '{printf("us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild-bazel@") $3}' >  /workspace/name_hash.txt
-    waitFor: ['tag']
+      skopeo copy --dest-registry-token `cat /workspace/token` --digestfile /workspace/hash.txt --preserve-digests   docker-daemon:us-central1-docker.pkg.dev/builder-project/repo1/securebuild-bazel:server docker://us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild-bazel:server
+    waitFor: ['build', 'token']
+
+  - name: docker.io/alpine@sha256:124c7d2707904eea7431fffe91522a01e5a861a624ee31d03372cc1d138a3126
+    id: finalize_name
+    entrypoint: '/bin/sh'
+    args:      
+    - '-c'
+    - |
+      echo -n us-central1-docker.pkg.dev/$PROJECT_ID/repo1/securebuild-bazel@`cat /workspace/hash.txt` > /workspace/name_hash.txt
+    waitFor: ['push']
 
   - name: docker.io/anchore/syft@sha256:7a0f80ba92423d6771da80c4b7d3d051759ed2b3f66a85a9922d448ea6eff60b
     id: generate_packages_attestation
@@ -25,7 +37,7 @@ steps:
     - '-c'
     - |    
       /syft packages  -o cyclonedx-json --file=/workspace/packages.json $(/busybox/cat /workspace/name_hash.txt)
-    waitFor: ['push']
+    waitFor: ['finalize_name']
 
   - id: attestations
     name: docker.io/library/ubuntu@sha256:67211c14fa74f070d27cc59d69a7fa9aeff8e28ea118ef3babc295a0428a6d21
@@ -33,8 +45,8 @@ steps:
     args:
       - -c
       - |
-        echo -n '{ "projectid": "$PROJECT_ID", "buildid": "$BUILD_ID", "foo":"bar", "commitsha": "$COMMIT_SHA", "name_hash": "$(cat /workspace/name_hash.txt)"}' > /workspace/predicates.json
-    waitFor: ['push']
+        echo -n '{ "projectid": "$PROJECT_ID", "buildid": "$BUILD_ID", "foo":"bar", "commitsha": "$COMMIT_SHA"}' > /workspace/predicates.json
+    waitFor: ['build']
 
   - name: gcr.io/projectsigstore/cosign@sha256:ac8e08a2141e093f4fd7d1d0b05448804eb3771b66574b13ad73e31b460af64d
     id: sign_kms
@@ -43,7 +55,7 @@ steps:
     - '-c'
     - |
       cosign sign --annotations=key1=value1 --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 $(cat /workspace/name_hash.txt)
-    waitFor: ['push']
+    waitFor: ['finalize_name']
 
   - name: gcr.io/projectsigstore/cosign@sha256:ac8e08a2141e093f4fd7d1d0b05448804eb3771b66574b13ad73e31b460af64d
     id: attest_kms
@@ -52,7 +64,7 @@ steps:
     - '-c'
     - |
       cosign attest --key gcpkms://projects/$PROJECT_ID/locations/global/keyRings/cosignkr/cryptoKeys/key1/cryptoKeyVersions/1 --predicate=/workspace/predicates.json -y $(cat /workspace/name_hash.txt)
-    waitFor: ['push','sign_kms']
+    waitFor: ['finalize_name', 'attestations']
 
   - name: gcr.io/projectsigstore/cosign@sha256:ac8e08a2141e093f4fd7d1d0b05448804eb3771b66574b13ad73e31b460af64d
     id: attest_packages_kms
@@ -105,8 +117,6 @@ steps:
       cosign attest -f --predicate=/workspace/packages.json --type="https://cyclonedx.org/bom/v1.4" -y  $(cat /workspace/name_hash.txt)
     waitFor: ['generate_packages_attestation']    
 
-
-
   - name: docker.io/anchore/syft@sha256:7a0f80ba92423d6771da80c4b7d3d051759ed2b3f66a85a9922d448ea6eff60b
     id: generate_sbom
     entrypoint: 'sh'
@@ -114,7 +124,7 @@ steps:
     - '-c'
     - |    
       /syft packages $(/busybox/cat /workspace/name_hash.txt) -o=spdx --file=/workspace/latest.spdx
-    waitFor: ['push']
+    waitFor: ['finalize_name']
 
   - name: gcr.io/projectsigstore/cosign@sha256:ac8e08a2141e093f4fd7d1d0b05448804eb3771b66574b13ad73e31b460af64d
     id: attach_sbom
