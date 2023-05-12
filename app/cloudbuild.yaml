@@ -12,7 +12,7 @@ steps:
     - |
       gcloud auth print-access-token > /workspace/token
 
-  - name: quay.io/containers/skopeo@sha256:2f90e4c091a45cf0f92916642a97227531c4242ea18979b16359966ca358ec63
+  - name: quay.io/containers/skopeo@sha256:b6090d267840441647186a285549a5186d83f32f13b9b33bc77b89e30c52afb0
     id: push
     entrypoint: '/bin/bash'
     args:      
