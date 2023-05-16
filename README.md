@@ -1,4 +1,4 @@
-# Deterministic container hashes and container signing using Cosign, Bazel and Google Cloud Buildcosign@
+# Deterministic container hashes and container signing using Cosign, Bazel and Google Cloud Build
 
 A simple tutorial that generates consistent container image hashes using `bazel` and then signs provenance records using [cosign](https://github.com/sigstore/cosign) (Container Signing, Verification and Storage in an OCI registry).
 
