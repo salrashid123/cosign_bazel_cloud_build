@@ -1,6 +1,6 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
 load("@io_bazel_rules_docker//go:image.bzl", "go_image")
-load("@io_bazel_rules_docker//container:container.bzl", "container_image")
+load("@io_bazel_rules_docker//container:container.bzl", "container_image", "container_push")
 load("@bazel_gazelle//:def.bzl", "gazelle")
 
 gazelle(name = "gazelle")
@@ -8,7 +8,7 @@ gazelle(name = "gazelle")
 # bazel run :gazelle -- update-repos -from_file=go.mod -prune=true -to_macro=repositories.bzl%go_repositories
 # bazel run  --platforms=@io_bazel_rules_go//go/toolchain:linux_amd64 :main
 # bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_amd64 :server
-#
+# bazel run --define=PROJECT_ID=$PROJECT_ID --platforms=@io_bazel_rules_go//go/toolchain:linux_amd64 :push_image
 # bazel run  --platforms=@io_bazel_rules_go//go/toolchain:linux_amd64 :server
 
 
@@ -35,6 +35,15 @@ container_image(
     ports = ["8080"],
     repository = "us-central1-docker.pkg.dev/builder-project/repo1/securebuild-bazel"
     #repository = "docker.io/salrashid123/securebuild-bazel"    
+)
+
+container_push(
+   name = "push_image",
+   image = ":server",
+   format = "Docker",
+   registry = "us-central1-docker.pkg.dev",
+   repository = "$(PROJECT_ID)/repo1/securebuild-bazel",
+   tag = "server",
 )
 
 go_library(
